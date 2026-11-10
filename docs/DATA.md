@@ -1,19 +1,34 @@
 # Data mapping: API shapes and where each field is shown
 
-The page talks to the server only through these GET endpoints. All return JSON unless noted. Every request must come with a `Host` of `127.0.0.1:<port>` or `localhost:<port>`.
+The page talks to the server only through these GET endpoints. All return JSON unless noted, with the headers in R-S6. Every request must come with an allowed `Host` (R-S2). Numbers below cite [RULES.md](RULES.md).
 
 | Endpoint | Returns |
 |---|---|
-| `/` | the page |
+| `/`, `/app.js`, `/theme.js` | the page and its scripts |
 | `/favicon.svg` | the icon |
+| `/vendor/…` | vendored libraries, styles and fonts (R-S9) |
 | `/api/pid` | the server's pid as text, with header `x-flowscope: 1` (used by `start` and `stop`) |
 | `/api/runs` | `RunSummary[]`, newest activity first; ETag, `304` when unchanged |
 | `/api/run?p=&s=&r=` | `RunDetail` |
 | `/api/agent?p=&s=&r=&a=` | `Event[]`, one agent's transcript |
-| `/api/search?q=` | `{ indexing, hits }`; queries shorter than 3 characters return no hits |
+| `/api/search?q=` | `{ indexing, hits }`; limits in R-L3, R-L4 |
 | `/api/format` | `FormatIssue[]` |
 
-`p` is the raw project directory name (`projectKey`), `s` the session (or CLI batch id), `r` the run id (`wf_…`, `agents`, or `cli`), `a` an agent id. Invalid names return `400`; an unknown CLI batch returns `404`.
+`p` is the raw project directory name (`projectKey`), `s` the session (or CLI batch id), `r` the run id (`wf_…`, `agents`, or `cli`), `a` an agent id.
+
+## Errors
+
+Every error is a short plain-text body; none carries a stack, a path or file content.
+
+| Status | Body | When |
+|---|---|---|
+| `400` | `bad request` | `/api/run` or `/api/agent` with `p`, `s` or `r` missing or not a safe name (R-S4); `/api/agent` with `a` missing or not a safe name. |
+| `400` | `query too long` | `/api/search` with `q` over 200 characters after trimming (R-L3). |
+| `403` | `forbidden` | Any request whose `Host` is not allowed (R-S2), checked before anything else. |
+| `404` | `not found` | A path that is not served (R-S9) or not an endpoint above; `/api/run?r=cli` with an unknown batch id. |
+| `500` | `internal error` | Anything unexpected while answering (R-S5). |
+
+An unknown workflow or session with valid names is not an error: `/api/run` answers an empty run and `/api/agent` an empty list.
 
 ## RunSummary
 
@@ -64,7 +79,7 @@ The page talks to the server only through these GET endpoints. All return JSON u
 | `startedAt`, `lastActivity` | ms | card duration or "ago", timeline bar, table "Took" |
 | `model`, `effort`, `attempt` | strings / number | drawer meta; `attempt > 1` is flagged |
 | `usage`, `tools`, `peakContext` | numbers | card line, drawer meta, timeline tooltip |
-| `now` | latest action, ≤ 160 characters | running card's last line, table result column while running |
+| `now` | latest action (R-L7) | running card's last line, table result column while running |
 | `waiting` | `{ tool, since }` \| null | "⏳ waiting on X for N", longest wait stat, needs-a-look strip |
 | `apiError` | `{ kind, text }` \| null | red "usage limit" / "API error" flag, needs-a-look strip, red timeline bar |
 | `resume` | CLI only: resume command for this run | terminal button in the drawer |
@@ -76,11 +91,11 @@ The page talks to the server only through these GET endpoints. All return JSON u
 | `prompt` | `text`, `ts` | first: the **task** row (also the Task tab); later ones: **message** rows, or folded system notes when the text starts with a tag like `<system-reminder>` |
 | `text` | `text`, `ts` | the agent's words, as Markdown |
 | `tool` | `id`, `name`, `text` (hint), `input` (JSON text or raw), `desc`, `cmd`, `ts` | a folded row: tool name, description or shortened command/path, duration, output size, status |
-| `output` | `for` (tool id), `text` (≤ 20,000 chars), `error`, `images` (data URLs), `ts` | folded into its tool's row; shown alone only if its tool call is missing |
+| `output` | `for` (tool id), `text` (cut per R-L5), `error`, `images` (data URLs, R-S10, R-L6), `ts` | folded into its tool's row; shown alone only if its tool call is missing |
 
 ## Search
 
-`hits[]`: `{ run: "<session>/<runId>", agentId, label, snippet, count, at }`, at most 200, newest first. `indexing` is `{ done, total }` while the first index is being built (then `hits` is empty and the page asks again in 1.5 s), otherwise null. The page shows only hits whose run is in the current run list.
+`hits[]`: `{ run: "<session>/<runId>", agentId, label, snippet, count, at }`, at most 200, newest first, snippet and count per R-L4. `indexing` is `{ done, total }` while the first index is being built (then `hits` is empty and the page asks again per R-T27), otherwise null. The page shows only hits whose run is in the current run list.
 
 ## FormatIssue
 
@@ -91,5 +106,5 @@ The page talks to the server only through these GET endpoints. All return JSON u
 | State | Where kept |
 |---|---|
 | open run, open agent, transcript step | URL hash `#<session>/<runId>[/<agentId>[/<step>]]` |
-| theme, run filter, transcript filter, notifications on | `localStorage` keys `flowscope.theme`, `.filter`, `.tfilter`, `.notify` |
+| theme, run filter, transcript filter, notifications on | `localStorage` (R-U7) |
 | view (board/table vs timeline), table search, shape filter, rows shown | memory only |

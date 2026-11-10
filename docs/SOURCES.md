@@ -13,9 +13,9 @@ Under the Claude root, `<project>` is the working directory with every non-alpha
 
 ## How files are read
 
-- **JSONL** files are read in 8 MB chunks and split on newlines. A line that fails to parse is skipped. When only some lines matter, the raw bytes are first searched for a needle (`"usage"`, `"ai-title"`, `"cwd"`), and only lines containing it are decoded and parsed.
+- **JSONL** files are read in chunks (R-L2) and split on newlines. A line that fails to parse is skipped, and an over-long line is skipped unread (R-L1). Symbolic links under the roots are not followed (R-S8). When only some lines matter, the raw bytes are first searched for a needle (`"usage"`, `"ai-title"`, `"cwd"`), and only lines containing it are decoded and parsed.
 - **JSON** files are read whole; a parse failure counts as "absent".
-- **Header probes** read only the first 512 KB (`headHas`), to classify a session without reading all of it.
+- **Header probes** read only the head of a file (`headHas`, R-L2), to classify a session without reading all of it.
 - Every derived result is cached by the file's `mtime:size` (see [ARCHITECTURE.md](ARCHITECTURE.md#caching)).
 
 ## Claude Code: workflow runs
@@ -49,8 +49,8 @@ File: `<root>/<project>/<session>.jsonl`, the same place as interactive sessions
 
 | Check / field | Use |
 |---|---|
-| First 512 KB contain `"text":"You are a Claude agent, built on` | it is headless (Agent SDK system prompt); otherwise skipped |
-| first `type: "user"` line: `sessionId`, `cwd`, `timestamp`, `message.content` | run id, folder, start time, prompt (role, label, first 300 characters for grouping) |
+| The head contains the marker in R-K4 | it is headless (Agent SDK system prompt); otherwise skipped |
+| first `type: "user"` line: `sessionId`, `cwd`, `timestamp`, `message.content` | run id (a safe name, R-S4, else the run is skipped), folder, start time, prompt (role, label, `head` for grouping, R-L7) |
 | every user line with text | turn count; newest prompt's heading for live sessions |
 | the rest | as *Transcripts*; result = final text when the run ended on text |
 
@@ -60,7 +60,7 @@ Files: every `*.jsonl` under the Codex root, recursively.
 
 | Record | Fields used | Use |
 |---|---|---|
-| line 1, `type: "session_meta"` | `payload.originator` must be `codex_exec`; `payload.id`, `payload.cwd`, `payload.timestamp` | id, folder, start |
+| line 1, `type: "session_meta"` | `payload.originator` must be `codex_exec`; `payload.id` (a safe name, R-S4, else the run is skipped), `payload.cwd`, `payload.timestamp` | id, folder, start |
 | `type: "turn_context"` | `payload.model` (first), `payload.effort` (last) | model, effort |
 | `type: "response_item"`, `payload.type: "message"` | `role` (`user`, `assistant`; `developer` skipped), `content[].text`; user text starting `<environment_context` is skipped | prompt, agent text |
 | `response_item` with `payload.type` `function_call`, `custom_tool_call`, `local_shell_call` | `name`, `call_id`, `input` / `arguments` / `action` | tool calls, waiting state |
@@ -83,7 +83,7 @@ One JSON object per line. Flowscope uses:
 | `effort` | effort level (last value) |
 | `isApiErrorMessage`, `error` | API error / usage limit on the last assistant line |
 
-Limits applied when sending a transcript to the page: tool output text is cut at 20,000 characters; images of 3 MB or more of base64 are dropped; image types other than PNG, JPEG, GIF and WebP are dropped.
+Limits applied when sending a transcript to the page: tool output text is cut per R-L5; images are dropped per R-L6 and R-S10.
 
 ## What is written
 
