@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // Flowscope: reads Claude Code's workflow runs from ~/.claude/projects and serves a live view of them on localhost.
 // It never changes Claude Code's files; the only thing it writes is its own cache, ~/.claude/flowscope/cache.db.
-import { readdirSync, readFileSync, statSync, existsSync, openSync, readSync, closeSync, mkdirSync, chmodSync } from "node:fs";
+import { readdirSync, readFileSync, statSync, lstatSync, existsSync, openSync, readSync, closeSync, mkdirSync, chmodSync } from "node:fs";
 import { Database } from "bun:sqlite";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
@@ -28,7 +28,13 @@ if (args.help) {
   -o, --open       open the page in the browser
   -h, --help       show this help
 
-  Reads ${join(homedir(), ".claude", "projects")} (override with $CLAUDE_PROJECTS_DIR).`);
+  Shows Claude Code workflow runs and plain subagents, and headless \`claude -p\` and \`codex exec\` runs.
+
+  Environment:
+    FLOWSCOPE_PORT       port, when -p is not given (default 4747)
+    CLAUDE_PROJECTS_DIR  Claude Code's projects (default ${join(homedir(), ".claude", "projects")})
+    CODEX_SESSIONS_DIR   Codex's sessions (default ${join(homedir(), ".codex", "sessions")})
+    FLOWSCOPE_CACHE      Flowscope's own cache and log (default ${join(homedir(), ".claude", "flowscope")})`);
   process.exit(0);
 }
 
@@ -37,9 +43,11 @@ const PORT = Number(args.port ?? process.env.FLOWSCOPE_PORT ?? 4747);
 const PUBLIC = join(import.meta.dir, "public");
 const url = `http://127.0.0.1:${PORT}`;
 // The cache and the log hold prompts and answers, so their folder is the user's alone (not a shared temp folder).
+// Everything Flowscope creates (cache folder, cache.db and its -wal/-shm files, the log) is the user's alone (R-S7).
+process.umask(0o077);
 const CACHE_DIR = process.env.FLOWSCOPE_CACHE ?? join(homedir(), ".claude", "flowscope");
 mkdirSync(CACHE_DIR, { recursive: true, mode: 0o700 });
-try { chmodSync(CACHE_DIR, 0o700); } catch {}
+try { chmodSync(CACHE_DIR, 0o700); } catch (e) { console.warn(`flowscope: could not make ${CACHE_DIR} private (mode 0700): ${(e as Error).message}`); }
 const LOG = join(CACHE_DIR, "flowscope.log");
 const opener = process.platform === "darwin" ? ["open"] : process.platform === "win32" ? ["cmd", "/c", "start", ""] : ["xdg-open"];
 const openPage = () => { try { Bun.spawn([...opener, url]); } catch { console.log(`open ${url} in a browser`); } };
@@ -66,7 +74,8 @@ if (!args.foreground) {
   let pid = await runningPid();
   if (pid !== null) console.log(`Flowscope already running on ${url} (pid ${pid})`);
   else {
-    const log = openSync(LOG, "a");
+    const log = openSync(LOG, "a", 0o600);
+    try { chmodSync(LOG, 0o600); } catch {}
     spawn(process.execPath, [import.meta.path, "--foreground", "--port", String(PORT)], { detached: true, stdio: ["ignore", log, log] }).unref();
     for (let i = 0; i < 50 && pid === null; i++) { await Bun.sleep(100); pid = await runningPid(); }
     if (pid === null) { console.error(`Flowscope did not start; see ${LOG}`); process.exit(1); }
@@ -77,16 +86,19 @@ if (!args.foreground) {
 }
 // A run without its final record is "running" while anything in it was written this recently. Generous, because an agent
 // waiting on a long command (tests, a browser, a background task) writes nothing until the command returns.
-const LIVE_MS = 15 * 60_000;
+const LIVE_MS = 15 * 60_000; // R-T1
 
 // What Flowscope has worked out from each file (a run's summary, token counts, how an agent ended, an answer), kept
 // on disk with the file's size and time, so a restart reads only files that are new or changed since. Answers of
 // finished CLI runs, the bulk of it, stay here and are read when that run is opened. Bump VERSION when a stored
 // shape changes, and the old entries are simply not found.
-const VERSION = 1;
-const db = new Database(join(CACHE_DIR, "cache.db"));
+const VERSION = 1; // R-C2
+const DB = join(CACHE_DIR, "cache.db");
+const db = new Database(DB);
 db.run("PRAGMA journal_mode = WAL"); db.run("PRAGMA synchronous = OFF");
 db.run("CREATE TABLE IF NOT EXISTS kv (kind TEXT, path TEXT, key TEXT, value TEXT, PRIMARY KEY (kind, path))");
+// A cache made before the umask was set may be readable by others; it is made private too (R-S7).
+for (const f of [DB, `${DB}-wal`, `${DB}-shm`]) if (existsSync(f)) try { chmodSync(f, 0o600); } catch (e) { console.warn(`flowscope: could not make ${f} private: ${(e as Error).message}`); }
 const getQ = db.prepare("SELECT key, value FROM kv WHERE kind = ? AND path = ?");
 const putQ = db.prepare("INSERT OR REPLACE INTO kv VALUES (?, ?, ?, ?)");
 const fileKey = (f: string) => { try { const st = statSync(f); return `${st.mtimeMs}:${st.size}`; } catch { return "none"; } };
@@ -99,14 +111,21 @@ function stored<T>(kind: string, path: string, key: string, make: () => T): T {
 }
 // A name that is one path part: no slash, and no leading dot, so never "." or "..". Ids and folder names that end up
 // in the page's links and click handlers must pass it too, so a file name can't break out of them.
-const SAFE = /^[A-Za-z0-9_-][A-Za-z0-9._-]*$/;
+const SAFE = /^[A-Za-z0-9_-][A-Za-z0-9._-]*$/; // R-S4
 
-const ls = (dir: string) => (existsSync(dir) ? readdirSync(dir) : []);
+// Entries of a folder under the input roots, without symbolic links: a link could point Flowscope at files outside
+// the roots it was given (R-S8). Regular files and folders only.
+const ls = (dir: string) => {
+  if (!existsSync(dir)) return [];
+  try { return readdirSync(dir, { withFileTypes: true }).filter((d) => !d.isSymbolicLink()).map((d) => d.name); } catch { return []; }
+};
 const mtime = (f: string) => (existsSync(f) ? statSync(f).mtimeMs : 0);
 // Transcripts are read in pieces through one buffer and decoded a line at a time, or, given a needle, only the
 // lines that contain it. Reading each whole file into memory left the process at 2.5GB: Flowscope reads gigabytes
 // of transcripts, and Bun keeps memory it has once used.
 const CHUNK = Buffer.allocUnsafe(8 << 20);
+// A single line longer than this is skipped up to its end, so one huge line cannot grow memory without bound (R-L1).
+const MAX_LINE = 64 << 20;
 function lines(f: string, needle?: string): string[] {
   // Every 128MB read, before the next file: by then the last ones' parsed records are garbage, and collected before
   // they pile up. Memory Bun has once used it keeps, so the peak is what stays.
@@ -114,11 +133,16 @@ function lines(f: string, needle?: string): string[] {
   let fd: number;
   try { fd = openSync(f, "r"); } catch { return []; }
   const out: string[] = [], n = needle ? Buffer.from(needle) : null;
-  let carry: Buffer | null = null;
+  let carry: Buffer | null = null, skipping = false;
   try {
     for (;;) {
       const got = readSync(fd, CHUNK, 0, CHUNK.length, null);
-      const data: Buffer = carry ? Buffer.concat([carry, CHUNK.subarray(0, got)]) : CHUNK.subarray(0, got);
+      let data: Buffer = carry ? Buffer.concat([carry, CHUNK.subarray(0, got)]) : CHUNK.subarray(0, got);
+      if (skipping) {
+        const nl = data.indexOf(10);
+        if (nl < 0) { if (!got) break; continue; }
+        data = data.subarray(nl + 1); skipping = false;
+      }
       // Complete lines only; the rest waits for the next piece, or ends the file.
       const end = got ? data.lastIndexOf(10) + 1 : data.length;
       if (!n) for (let s = 0; s < end; ) { const e0 = data.indexOf(10, s), e = e0 < 0 || e0 >= end ? end : e0; if (e > s) out.push(data.toString("utf8", s, e)); s = e + 1; }
@@ -129,6 +153,8 @@ function lines(f: string, needle?: string): string[] {
       }
       carry = end < data.length ? Buffer.from(data.subarray(end)) : null;
       if (!got) break;
+      // An over-long line is dropped: what follows is skipped up to the next newline.
+      if (carry && carry.length > MAX_LINE) { carry = null; skipping = true; }
     }
   } finally { closeSync(fd); }
   readSinceGc += out.reduce((n, l) => n + l.length, 0);
@@ -240,7 +266,7 @@ function sessionCwd(project: string, session: string) {
 }
 const q1 = (s: string) => /^[\w./-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`;
 // Picking a session up again in a terminal. Subagents cannot be resumed on their own; their session can.
-const resumeCmd = (tool: string, cwd: string, id: string) => `${cwd ? `cd ${q1(cwd)} && ` : ""}${tool === "codex" ? "codex resume" : "claude --resume"} ${id}`;
+const resumeCmd = (tool: string, cwd: string, id: string) => `${cwd ? `cd ${q1(cwd)} && ` : ""}${tool === "codex" ? "codex resume" : "claude --resume"} ${q1(id)}`;
 
 function plainAgents(l: Loc) {
   const dir = runDir(l);
@@ -500,7 +526,7 @@ function toolHint(i: any) {
 const CODEX = process.env.CODEX_SESSIONS_DIR ?? join(homedir(), ".codex", "sessions");
 const CLI = "cli";
 const BATCH_GAP = 30 * 60_000;
-const PARALLEL_GAP = 10 * 60_000;
+const PARALLEL_GAP = 10 * 60_000; // R-T7, R-T8
 const HEADLESS = '"text":"You are a Claude agent, built on';
 
 // A run keeps only what is shown or grouped by, as fresh copies: its prompt runs to tens of kilobytes, and any piece
@@ -534,7 +560,8 @@ function parseClaude(f: string): CliRun | null {
   if (!headHas(f, HEADLESS)) return null;
   const lines = jsonl(f);
   const first = lines.find((x) => x.type === "user");
-  if (!first) return null;
+  // The id ends up in the page's links and attributes, so a run whose id is not a safe name is left out (R-S4).
+  if (!first || typeof first.sessionId !== "string" || !SAFE.test(first.sessionId)) return null;
   // A live session (stream-json input) gets one prompt per turn; the newest one says where it has got to.
   const asks = lines.filter((x) => x.type === "user" && textOf(x.message?.content).trim()).map((x) => textOf(x.message.content));
   const a: any = { state: "running" };
@@ -551,7 +578,7 @@ function parseClaude(f: string): CliRun | null {
 function parseCodex(f: string): CliRun | null {
   const lines = jsonl(f);
   const meta = lines[0]?.type === "session_meta" ? lines[0].payload : null;
-  if (meta?.originator !== "codex_exec") return null;
+  if (meta?.originator !== "codex_exec" || typeof meta.id !== "string" || !SAFE.test(meta.id)) return null;
   if (lines.length > 3 && !lines.some((x) => x.type === "response_item")) odd("a Codex rollout has no response_item records", f);
   const items = lines.filter((x) => x.type === "response_item").map((x) => ({ ...x.payload, ts: x.timestamp }));
   const user = items.filter((p) => p.type === "message" && p.role === "user").map((p) => textOf(p.content)).filter((t) => !t.startsWith("<environment_context"));
@@ -599,7 +626,7 @@ function cliBatches() {
   const all: CliRun[] = [];
   // A file can vanish between listing and reading; it is simply left out. An id that is not a safe name is too.
   const take = (f: string, parse: (f: string) => CliRun | null) => { try { const r = cached(f, parse); if (r && SAFE.test(r.id ?? "")) all.push(r); } catch {} };
-  for (const project of ls(ROOT)) for (const f of ls(join(ROOT, project))) if (f.endsWith(".jsonl")) take(join(ROOT, project, f), parseClaude);
+  for (const project of ls(ROOT).filter((n) => SAFE.test(n))) for (const f of ls(join(ROOT, project))) if (f.endsWith(".jsonl")) take(join(ROOT, project, f), parseClaude);
   for (const f of walk(CODEX)) take(f, parseCodex);
   // One batch: runs of one tool in one repository, each started soon after the one before. Parallel reviewers with
   // different prompts land together; a long series with the same prompt opening may space out more.
@@ -746,7 +773,7 @@ function searchable() {
   // An agent is named by its description, as on its card.
   const label = (dir: string, id: string) => json(join(dir, `agent-${id}.meta.json`))?.description;
   const idOf = (f: string) => { const id = f.match(/^agent-(.+)\.jsonl$/)?.[1]; return id && SAFE.test(id) ? id : null; };
-  for (const project of ls(ROOT)) for (const session of ls(join(ROOT, project)).filter((n) => SAFE.test(n))) {
+  for (const project of ls(ROOT).filter((n) => SAFE.test(n))) for (const session of ls(join(ROOT, project)).filter((n) => SAFE.test(n))) {
     const sub = join(ROOT, project, session, "subagents");
     for (const f of ls(sub)) { const id = idOf(f); if (id) files.set(join(sub, f), { run: `${session}/${AGENTS}`, agentId: id, label: label(sub, id) }); }
     for (const wf of ls(join(sub, "workflows")).filter((n) => SAFE.test(n))) for (const f of ls(join(sub, "workflows", wf))) {
@@ -768,6 +795,7 @@ async function buildIndex() {
 }
 // Kept while searches come, let go after 15 minutes without one: a few hundred MB that most visits never use.
 let lastSearch = 0;
+const SNIPPET_COUNT_MAX = 1000, QUERY_MAX = 200;
 setInterval(() => { if (indexed && Date.now() - lastSearch > 15 * 60_000) { textCache.clear(); indexed = false; } }, 60_000);
 function searchTranscripts(query: string) {
   lastSearch = Date.now();
@@ -777,7 +805,9 @@ function searchTranscripts(query: string) {
   const hits = [...files.keys()].filter((f) => lowText(f).indexOf(needle) >= 0).sort((a, b) => mtime(b) - mtime(a)).slice(0, 200);
   return { indexing: null, hits: hits.map((f) => {
     let snippet = "", count = 0;
+    // Counting stops at SNIPPET_COUNT_MAX places, so one huge transcript cannot hold a search up (R-L4).
     for (const x of jsonl(f)) {
+      if (count >= SNIPPET_COUNT_MAX) break;
       const t = lineText(x), at = t.toLowerCase().indexOf(ql);
       if (at < 0) continue;
       count++;
@@ -795,47 +825,64 @@ const locFrom = (u: URL): Loc | null => {
 // A web page in the browser can point its own domain at 127.0.0.1 (DNS rebinding) and then read this API as
 // same-origin; the Host it sends is still its own domain, so only our own names are served.
 const HOSTS = new Set([`127.0.0.1:${PORT}`, `localhost:${PORT}`]);
-// What the page may load. Markup that slips into a rendered transcript cannot reach out: no remote images, no fetch
-// or form to anywhere else. Inline script stays allowed because the page's handlers are inline.
-const CSP = ["default-src 'none'", "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com",
-  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com", "font-src https://fonts.gstatic.com",
+// What the page may load (R-S3): everything from Flowscope itself, nothing from anywhere else. No inline script: the
+// page's handlers are one delegated listener, so markup that slips into a rendered transcript cannot run code, load a
+// remote image, or fetch or post anywhere. Inline styles stay allowed: the page sets widths and positions with them.
+const CSP = ["default-src 'none'", "script-src 'self'", "style-src 'self' 'unsafe-inline'", "font-src 'self'",
   "img-src 'self' data:", "connect-src 'self'", "base-uri 'none'", "form-action 'none'", "frame-ancestors 'none'"].join("; ");
-const page = (f: string, type: string) => new Response(Bun.file(join(PUBLIC, f)), { headers: { "content-type": type, "content-security-policy": CSP, "x-content-type-options": "nosniff", "referrer-policy": "no-referrer" } });
+// The only files served: the page, its script, and the vendored libraries and fonts (R-S9). Nothing else in public/.
+const STATIC: Record<string, string> = {
+  "/": "index.html", "/favicon.svg": "favicon.svg", "/app.js": "app.js", "/theme.js": "theme.js",
+  "/vendor/marked.min.js": "vendor/marked.min.js", "/vendor/purify.min.js": "vendor/purify.min.js", "/vendor/highlight.min.js": "vendor/highlight.min.js",
+  "/vendor/github.min.css": "vendor/github.min.css", "/vendor/github-dark.min.css": "vendor/github-dark.min.css", "/vendor/fonts.css": "vendor/fonts.css",
+  ...Object.fromEntries(["sans-400", "sans-500", "sans-600", "sans-arabic-400", "sans-arabic-500", "sans-arabic-600", "mono-400", "mono-500"]
+    .map((w) => [`/vendor/fonts/plex-${w}.woff2`, `vendor/fonts/plex-${w}.woff2`])),
+};
+const TYPES: Record<string, string> = { html: "text/html; charset=utf-8", svg: "image/svg+xml", js: "text/javascript; charset=utf-8", css: "text/css; charset=utf-8", woff2: "font/woff2" };
+const SECURE = { "content-security-policy": CSP, "x-content-type-options": "nosniff", "referrer-policy": "no-referrer" };
+const page = (f: string) => new Response(Bun.file(join(PUBLIC, f)), { headers: { "content-type": TYPES[f.split(".").pop()!], ...SECURE } });
+// Every API answer: never cached by the browser, never sniffed as another type (R-S6).
+const API = { "x-content-type-options": "nosniff", "cache-control": "no-store", "referrer-policy": "no-referrer" };
+const json200 = (v: unknown) => new Response(JSON.stringify(v), { headers: { "content-type": "application/json", ...API } });
+const text = (body: string, status: number, extra: Record<string, string> = {}) => new Response(body, { status, headers: { "content-type": "text/plain; charset=utf-8", ...API, ...extra } });
 
 Bun.serve({
   port: PORT,
   idleTimeout: 30,
   hostname: "127.0.0.1",
+  // No development error pages: a failure answers a plain 500 that says nothing about the files or the code (R-S5).
+  development: false,
+  error(e) { console.error(e); return text("internal error", 500); },
   fetch(req) {
-    if (!HOSTS.has(req.headers.get("host") ?? "")) return new Response("forbidden", { status: 403 });
+    if (!HOSTS.has(req.headers.get("host") ?? "")) return text("forbidden", 403);
     const u = new URL(req.url);
-    if (u.pathname === "/") return page("index.html", "text/html; charset=utf-8");
-    if (u.pathname === "/favicon.svg") return page("favicon.svg", "image/svg+xml");
-    if (u.pathname === "/api/pid") return new Response(String(process.pid), { headers: { "x-flowscope": "1" } });
-    if (u.pathname === "/api/format") return Response.json([...formatIssues.values()]);
+    if (Object.hasOwn(STATIC, u.pathname)) return page(STATIC[u.pathname]);
+    if (u.pathname === "/api/pid") return text(String(process.pid), 200, { "x-flowscope": "1" });
+    if (u.pathname === "/api/format") return json200([...formatIssues.values()]);
     if (u.pathname === "/api/search") {
       const qs = (u.searchParams.get("q") ?? "").trim();
-      return qs.length < 3 ? Response.json({ indexing: null, hits: [] }) : Response.json(searchTranscripts(qs));
+      // Under 3 characters finds too much to be useful; over QUERY_MAX is refused (R-L3).
+      if (qs.length > QUERY_MAX) return text("query too long", 400);
+      return qs.length < 3 ? json200({ indexing: null, hits: [] }) : json200(searchTranscripts(qs));
     }
     if (u.pathname === "/api/runs") {
       // Most polls find nothing new: answer those with 304 and no body.
       const body = JSON.stringify(listRuns());
       const tag = `"${Bun.hash(body).toString(36)}"`;
-      if (req.headers.get("if-none-match") === tag) return new Response(null, { status: 304, headers: { etag: tag } });
-      return new Response(body, { headers: { "content-type": "application/json", etag: tag, "cache-control": "no-cache" } });
+      // no-cache, not no-store: the page revalidates with the ETag (R-S6).
+      if (req.headers.get("if-none-match") === tag) return new Response(null, { status: 304, headers: { ...API, etag: tag, "cache-control": "no-cache" } });
+      return new Response(body, { headers: { "content-type": "application/json", ...API, etag: tag, "cache-control": "no-cache" } });
     }
+    if (u.pathname !== "/api/run" && u.pathname !== "/api/agent") return text("not found", 404);
     const l = locFrom(u);
-    if (!l) return new Response("bad request", { status: 400 });
+    if (!l) return text("bad request", 400);
     if (u.pathname === "/api/run") {
-      if (l.runId !== CLI) return Response.json(l.runId === AGENTS ? agentsDetail(l) : detail(l));
+      if (l.runId !== CLI) return json200(l.runId === AGENTS ? agentsDetail(l) : detail(l));
       const b = cliBatches().find((b) => b.id === l.session);
-      return b ? Response.json(cliDetail(b)) : new Response("not found", { status: 404 });
+      return b ? json200(cliDetail(b)) : text("not found", 404);
     }
-    if (u.pathname === "/api/agent") {
-      const a = u.searchParams.get("a") ?? "";
-      return SAFE.test(a) ? Response.json(transcript(l, a)) : new Response("bad request", { status: 400 });
-    }
-    return new Response("not found", { status: 404 });
+    const a = u.searchParams.get("a") ?? "";
+    return SAFE.test(a) ? json200(transcript(l, a)) : text("bad request", 400);
   },
 });
 console.log(`Flowscope on ${url}`);
