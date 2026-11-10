@@ -94,8 +94,8 @@ Flowscope shows your prompts, code and tool output, so:
 | 🔒 **Read-only** | Never writes to `~/.claude` or `~/.codex` (a test checks it byte for byte). Its only output is its own cache. |
 | 🏠 **Local only** | Binds `127.0.0.1` and refuses any request not addressed to it, which blocks DNS rebinding. |
 | 🛡️ **Hostile text stays inert** | Transcripts can hold text from any web page. Everything is escaped and sanitised, and a strict Content Security Policy stops injected markup from loading or sending anything. |
-| 📦 **Zero dependencies** | One TypeScript file and one HTML file. Nothing to `npm install`, nothing to audit but ~1,700 lines. |
-| 📡 **No telemetry** | No analytics, no update checks. The page loads three pinned, integrity-checked libraries from public CDNs. |
+| 📦 **Zero dependencies** | One TypeScript server and a page of plain HTML and JavaScript. Nothing to `npm install`, nothing to audit but ~1,800 lines and three pinned, vendored libraries. |
+| 📡 **No outbound requests** | No analytics, no update checks, no CDN. The page's libraries and fonts are vendored and served by Flowscope itself, with integrity hashes; it works offline. |
 
 Details: [SECURITY.md](SECURITY.md).
 
@@ -148,7 +148,7 @@ CLAUDE_PROJECTS_DIR=/tmp/flowscope-demo/claude CODEX_SESSIONS_DIR=/tmp/flowscope
 
 ### CLI runs
 
-A script that calls `claude -p` or `codex exec` once per item leaves one session per call: Claude Code writes it under `~/.claude/projects` like any session but with the Agent SDK's system prompt, and Codex writes a rollout under `~/.codex/sessions` (override with `$CODEX_SESSIONS_DIR`) marked `codex_exec`. Flowscope puts runs of one tool, in one folder, whose prompts open the same way (first 300 characters), into one batch, and starts a new batch after a 30-minute gap between starts. Each run is a card named by the last heading in its prompt (`# …` or `=== … ===`), which is usually the part that changes, such as `JUST HEARD (paragraph 12)`. A **live** Claude session, one a script keeps open and feeds a prompt per turn (`claude -p --input-format stream-json`), is one card named by its newest prompt's heading and its turn count, such as `JUST HEARD (paragraph 97) · 97 turns`. A Codex run is `done` when it logged `task_complete`; a Claude run is `done` when it ended on a text reply. A Codex batch shows `—` for share of the week, because Codex is billed separately.
+A script that calls `claude -p` or `codex exec` once per item leaves one session per call: Claude Code writes it under `~/.claude/projects` like any session but with the Agent SDK's system prompt, and Codex writes a rollout under `~/.codex/sessions` (override with `$CODEX_SESSIONS_DIR`) marked `codex_exec`. Flowscope puts runs of one tool, in one folder, whose prompts open the same way (first 300 characters), into one batch, and starts a new batch after a gap between starts: 30 minutes when the prompts open the same way, 10 otherwise ([R-T7, R-T8](docs/RULES.md#r-t-timing)). Each run is a card named by the last heading in its prompt (`# …` or `=== … ===`), which is usually the part that changes, such as `JUST HEARD (paragraph 12)`. A **live** Claude session, one a script keeps open and feeds a prompt per turn (`claude -p --input-format stream-json`), is one card named by its newest prompt's heading and its turn count, such as `JUST HEARD (paragraph 97) · 97 turns`. A Codex run is `done` when it logged `task_complete`; a Claude run is `done` when it ended on a text reply. A Codex batch shows `—` for share of the week, because Codex is billed separately.
 
 ### Status, and why it can lag
 
@@ -186,19 +186,25 @@ Field-by-field shapes are in [docs/DATA.md](docs/DATA.md).
 ```sh
 bun run dev               # restarts on server changes
 bun test                  # end-to-end tests against the demo data
+bun run trace             # the docs and the tests agree; prints coverage
 ```
 
+The docs are the specification and the code follows them: see [CONTRIBUTING.md](CONTRIBUTING.md).
+
 - `server.ts` — the Bun server: finds runs, works out status and tokens, serves the API and the page
-- `public/index.html` — the whole page (no build step)
+- `public/index.html`, `public/app.js`, `public/theme.js` — the whole page (no build step); `public/vendor/` — marked, DOMPurify, highlight.js and IBM Plex, vendored
 - `scripts/demo.ts` — writes the made-up data used by the tests and screenshots
-- `test/server.test.ts` — the end-to-end tests
+- `test/server.test.ts` — the end-to-end tests, each named by the F-/R- ids it checks
+- `scripts/trace.ts` — checks that docs and tests agree
 
 ### Design documents
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — what the server works out (status, tokens, batches, caching, security) and why
 - [docs/SOURCES.md](docs/SOURCES.md) — every input file and field read
 - [docs/DATA.md](docs/DATA.md) — API shapes and where each field shows on the page
-- [docs/FLOWS.md](docs/FLOWS.md) — user flows, written as end-to-end tests
+- [docs/FLOWS.md](docs/FLOWS.md) — user flows as checks with ids, and the test that covers each
+- [docs/RULES.md](docs/RULES.md) — every constant, threshold and limit
+- [CONTRIBUTING.md](CONTRIBUTING.md) — docs as the source of truth, the id scheme, running tests and trace
 - [docs/UX.md](docs/UX.md) — the interface design
 
 ## License
