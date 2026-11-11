@@ -26,7 +26,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/img/live.png" alt="A live workflow: phases as columns, one agent waiting on a tool for 9 minutes" width="900">
+  <img src="docs/img/tour.gif" alt="A tour of Flowscope: a live workflow's board, an agent waiting on a tool, its transcript, the timeline, and a batch of 40 claude -p runs" width="900">
 </p>
 
 You launched a workflow with 30 agents, or a script that fires 200 `claude -p` calls, and went back to work. Now: is it moving? Is one agent stuck on a test run? Did half of them hit the usage limit? What did agent 17 actually say?
@@ -195,6 +195,7 @@ The docs are the specification and the code follows them: see [CONTRIBUTING.md](
 - `server.ts` — the Bun server: finds runs, works out status and tokens, serves the API and the page
 - `public/index.html`, `public/app.js`, `public/theme.js` — the whole page (no build step); `public/vendor/` — marked, DOMPurify, highlight.js and IBM Plex, vendored
 - `scripts/demo.ts` — writes the made-up data used by the tests and screenshots
+- `scripts/tour.ts` — records the tour GIF above from that data (`bun scripts/tour.ts`; needs ffmpeg)
 - `test/server.test.ts` — the end-to-end tests, each named by the F-/R- ids it checks
 - `scripts/trace.ts` — checks that docs and tests agree
 
