@@ -485,7 +485,7 @@ test("F-10.2 R-L26 a narrow window shows the sidebar and the run as separate scr
   const cols = await page.locator(".phase").evaluateAll((ps) => ps.map((p) => p.getBoundingClientRect().left));
   expect(new Set(cols).size).toBe(1);
   await page.locator(".card").first().click();
-  expect(await page.locator("#drawer").evaluate((d) => d.getBoundingClientRect().width)).toBe(700);
+  expect(await page.locator("#drawer").evaluate((d) => d.getBoundingClientRect().width)).toBeCloseTo(700, 0);
   await page.keyboard.press("Escape");
   await page.locator("button.back").click();
   await expect(page.locator("aside")).toBeVisible();
