@@ -32,8 +32,14 @@ const firstStrong = (t) => (String(t).match(/[A-Za-z\u00C0-\u024F\u0590-\u08FF\u
 const isRtl = (t) => { const s = String(t), r = (s.match(/[\u0590-\u08FF\uFB1D-\uFEFC]/g) ?? []).length, l = (s.match(/[A-Za-z\u00C0-\u024F]/g) ?? []).length;
   return r + l ? r > l : /[\u0590-\u08FF\uFB1D-\uFEFC]/.test(firstStrong(s)); };
 const dirOf = (t) => isRtl(t) ? "rtl" : "ltr";
+// Images in Markdown are drawn only from data: URLs; any other address (another host, or a path on this server) is
+// shown as text and never asked for (F-12.1). The content policy would refuse another host anyway (R-S3).
 function bidi(html) {
   const t = document.createElement("template"); t.innerHTML = html;
+  for (const img of t.content.querySelectorAll("img")) if (!/^data:image\//i.test(img.getAttribute("src") ?? "")) {
+    const s = Object.assign(document.createElement("span"), { className: "noimg", title: img.getAttribute("src") ?? "", textContent: `[image${img.alt ? `: ${img.alt}` : ""}]` });
+    img.replaceWith(s);
+  }
   for (const el of t.content.querySelectorAll("ul, ol, table, blockquote")) el.setAttribute("dir", isRtl(el.textContent) ? "rtl" : "ltr");
   for (const el of t.content.querySelectorAll("li, p, h1, h2, h3, h4, h5, h6, td, th")) el.setAttribute("dir", dirOf(el.textContent));
   return t.innerHTML;
