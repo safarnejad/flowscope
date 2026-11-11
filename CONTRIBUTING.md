@@ -44,14 +44,20 @@ A check's **Test** column in docs/FLOWS.md names the tests that cite it (separat
 
 ```sh
 bun test          # end-to-end tests: the server against a fixture tree in a temp folder
+bun run e2e       # browser tests: the page in Chromium against its own server and fixture tree
 bun run trace     # docs and tests agree; prints coverage
 bun run demo /tmp/flowscope-demo   # the fixture tree, to look at by hand
 ```
 
 Tests never read or write the real `~/.claude` or `~/.codex`: they set `CLAUDE_PROJECTS_DIR`, `CODEX_SESSIONS_DIR` and `FLOWSCOPE_CACHE` to temp folders.
 
-The tests drive the API and the CLI. Checks that are only about drawing the page (most of sections 2, 3, 6, 8, 9, 10 of docs/FLOWS.md) are `—` for now: browser end-to-end tests are future work.
+There are two kinds of test, and `bun run trace` reads the names of both:
+
+- `test/*.test.ts` (`bun test`) drive the API and the CLI.
+- `e2e/*.e2e.ts` (`bun run e2e`, Playwright) drive the page in headless Chromium: they start `server.ts --foreground` on a spare port against a fixture tree, click and type as a user would, and stop it after. Every browser test also fails on a console error, an uncaught exception, a Content Security Policy violation, a dialog, or a request to any host but the server. They are named `.e2e.ts` so `bun test` does not pick them up.
+
+Both build their fixtures with `scripts/demo.ts` (X1, X2, X4–X6) and `test/fixtures.ts` (the rest). Before the first `bun run e2e`, run `bun install` and `bunx playwright install chromium`. To look at the page as the tests leave it, `FLOWSCOPE_SHOTS=<folder> bun run e2e` saves screenshots there.
 
 ## Dependencies
 
-None. The page's libraries and fonts are vendored in `public/vendor/` at pinned versions, with Subresource Integrity hashes in `public/index.html` (R-S9). To update one, replace the file from its upstream release, update its version in docs/RULES.md and SECURITY.md, and its hash in `index.html`; the test for F-12.7 checks that hash and file agree.
+No runtime dependencies: Flowscope runs on Bun alone, with nothing to install. The one development dependency is `@playwright/test`, pinned exactly in `package.json`, for the browser tests; it is never loaded by the server or the page. The page's libraries and fonts are vendored in `public/vendor/` at pinned versions, with Subresource Integrity hashes in `public/index.html` (R-S9). To update one, replace the file from its upstream release, update its version in docs/RULES.md and SECURITY.md, and its hash in `index.html`; the test for F-12.7 checks that hash and file agree.

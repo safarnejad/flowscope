@@ -1,6 +1,6 @@
 # User flows and end-to-end checks
 
-What a user does and what must happen, as checks with stable ids `F-<section>.<n>`. These tables are the specification: a test whose name starts with a check's id checks it, and `bun run trace` keeps the two in step (see [CONTRIBUTING.md](../CONTRIBUTING.md)). The **Test** column names that test, or says `—` when no automated test covers the check yet. Checks about drawing the page are `—` until there are browser tests. Numbers come from [RULES.md](RULES.md), cited by id.
+What a user does and what must happen, as checks with stable ids `F-<section>.<n>`. These tables are the specification: a test whose name starts with a check's id checks it, and `bun run trace` keeps the two in step (see [CONTRIBUTING.md](../CONTRIBUTING.md)). The **Test** column names that test, or says `—` when no automated test covers the check yet. Tests of the server and the CLI are in `test/` (`bun test`); tests of the page, driven in Chromium, are in `e2e/` (`bun run e2e`). Numbers come from [RULES.md](RULES.md), cited by id.
 
 Ids are never reused. A check that no longer holds is marked *retired* in its row and stays in the table.
 
@@ -46,34 +46,34 @@ Given X1, X2, X3, X4. Open `/`.
 
 | ID | Given | When | Then | Test |
 |---|---|---|---|---|
-| F-2.1 | runs of every state | open `/` | the sidebar has **Running** with X2 and the X4 agent group, **Recent** with up to 3 finished runs (R-L23); older ones sit behind **History (N) ›** | — |
-| F-2.2 | same | open `/` | the main area shows **Now** with the count running, runs active today and today's tokens (R-K3) | — |
-| F-2.3 | X3, and a running run quiet over R-T21 | open `/` | **Needs a look** lists X3 as stopped (idle under R-T25) and the quiet run | — |
-| F-2.4 | a run open | click **Flowscope** | returns home and clears the URL hash | — |
+| F-2.1 | runs of every state | open `/` | the sidebar has **Running** with X2 and the X4 agent group, **Recent** with up to 3 finished runs (R-L23); older ones sit behind **History (N) ›** | F-2.1 F-2.2 R-L23 R-K3 home: running, recent and history in the sidebar, Now with today's counts |
+| F-2.2 | same | open `/` | the main area shows **Now** with the count running, runs active today and today's tokens (R-K3) | F-2.1 F-2.2 R-L23 R-K3 home: running, recent and history in the sidebar, Now with today's counts |
+| F-2.3 | X3, and a running run quiet over R-T21 | open `/` | **Needs a look** lists X3 as stopped (idle under R-T25) and the quiet run | F-2.3 R-T21 a running run quiet over 10 minutes is under Needs a look; F-9.2 F-2.3 F-4.10 R-T25 a run that stops is told once and its notice opens it, home lists it under Needs a look |
+| F-2.4 | a run open | click **Flowscope** | returns home and clears the URL hash | F-2.4 clicking Flowscope returns home and clears the hash |
 
 ## 3. Filter and search runs
 
 | ID | Given | When | Then | Test |
 |---|---|---|---|---|
-| F-3.1 | all fixtures | click **Workflows** / **Agents** / **CLI**, reload | only X1–X3 / X4 / X5 and X6 show; the choice is kept (R-U7) | — |
-| F-3.2 | all fixtures | type part of a run's name | the list filters, grouped by day; no match shows "No run's name matches" | — |
-| F-3.3 | text only inside a transcript | type at least 3 characters of it | **In transcripts** shows "Reading transcripts…" first (R-T27), then hits with the match highlighted; clicking a hit opens its run and that agent's transcript | — |
-| F-3.4 | focus not in an input | press `/` | the search box takes focus | — |
+| F-3.1 | all fixtures | click **Workflows** / **Agents** / **CLI**, reload | only X1–X3 / X4 / X5 and X6 show; the choice is kept (R-U7) | F-3.1 R-U7 the kind filter shows only that kind and is kept across a reload |
+| F-3.2 | all fixtures | type part of a run's name | the list filters, grouped by day; no match shows "No run's name matches" | F-3.2 F-3.3 F-3.4 search: names by day, then hits inside transcripts that open the agent |
+| F-3.3 | text only inside a transcript | type at least 3 characters of it | **In transcripts** shows "Reading transcripts…" first (R-T27), then hits with the match highlighted; clicking a hit opens its run and that agent's transcript | F-3.2 F-3.3 F-3.4 search: names by day, then hits inside transcripts that open the agent |
+| F-3.4 | focus not in an input | press `/` | the search box takes focus | F-3.2 F-3.3 F-3.4 search: names by day, then hits inside transcripts that open the agent |
 
 ## 4. A workflow run
 
 | ID | Given | When | Then | Test |
 |---|---|---|---|---|
-| F-4.1 | X1 | open it | header: name and `completed` badge, description, stats (done of started 7/7, elapsed = `durationMs`, tokens, cache reads, share of the week, last activity) | F-4.1 F-4.4 F-4.5 R-S12 a finished workflow: status, phases, results, log, script, resume |
-| F-4.2 | X1 | open it | the phase strip has one segment per phase, all done; "Phase 3 of 3" | — |
-| F-4.3 | X1 | open it | one column per phase with "done/total"; each card shows label, tool count, tokens, peak context and duration, with a thin bar relative to the slowest agent | — |
-| F-4.4 | X1 | open it | **Log** is open; **Final result** and **Script** are folded and expand | F-4.1 F-4.4 F-4.5 R-S12 a finished workflow: status, phases, results, log, script, resume |
-| F-4.5 | X1 | **Copy resume command** | copies `cd <cwd> && claude --resume <session>`, each part quoted per R-S12 | F-4.1 F-4.4 F-4.5 R-S12 a finished workflow: status, phases, results, log, script, resume |
-| F-4.6 | X2 | open it | status `running`; phases come from the script; a phase with no agents shows as a column marked "not started" | F-4.6 F-4.7 a live workflow: running, one agent waiting on a tool, phases from the script |
-| F-4.7 | X2 | open it | the card in mid tool call shows "⏳ waiting on <Tool> for …"; amber over R-T24, red with "possibly stuck" over R-T23, and the needs-a-look strip shows "1 agent waiting on a tool over 10m" | F-4.6 F-4.7 a live workflow: running, one agent waiting on a tool, phases from the script |
-| F-4.8 | X2 | open it | the page title starts with `●`, or `⚠` when a wait is over R-T23 | — |
-| F-4.9 | X2 open | wait | the view refreshes per R-T20; an expanded tool call and the scroll position stay as they were | — |
-| F-4.10 | X3 | open it | status `stopped`; unfinished agents are `stopped` (R-T1) | F-4.10 R-T1 a workflow quiet past the live window is stopped, and so are its unfinished agents |
+| F-4.1 | X1 | open it | header: name and `completed` badge, description, stats (done of started 7/7, elapsed = `durationMs`, tokens, cache reads, share of the week, last activity) | F-4.1 F-4.4 F-4.5 R-S12 a finished workflow: status, phases, results, log, script, resume; F-4.1 F-4.2 F-4.3 F-4.4 a finished workflow's page: header, phase strip, columns, cards, folded sections |
+| F-4.2 | X1 | open it | the phase strip has one segment per phase, all done; "Phase 3 of 3" | F-4.1 F-4.2 F-4.3 F-4.4 a finished workflow's page: header, phase strip, columns, cards, folded sections |
+| F-4.3 | X1 | open it | one column per phase with "done/total"; each card shows label, tool count, tokens, peak context and duration, with a thin bar relative to the slowest agent | F-4.1 F-4.2 F-4.3 F-4.4 a finished workflow's page: header, phase strip, columns, cards, folded sections |
+| F-4.4 | X1 | open it | **Log** is open; **Final result** and **Script** are folded and expand | F-4.1 F-4.4 F-4.5 R-S12 a finished workflow: status, phases, results, log, script, resume; F-4.1 F-4.2 F-4.3 F-4.4 a finished workflow's page: header, phase strip, columns, cards, folded sections |
+| F-4.5 | X1 | **Copy resume command** | copies `cd <cwd> && claude --resume <session>`, each part quoted per R-S12 | F-4.1 F-4.4 F-4.5 R-S12 a finished workflow: status, phases, results, log, script, resume; F-4.5 R-S12 Copy resume command copies the session's command |
+| F-4.6 | X2 | open it | status `running`; phases come from the script; a phase with no agents shows as a column marked "not started" | F-4.6 F-4.7 a live workflow: running, one agent waiting on a tool, phases from the script; F-4.6 F-4.7 F-4.8 R-T24 a live workflow: phase not started, a long wait in amber, ● in the title |
+| F-4.7 | X2 | open it | the card in mid tool call shows "⏳ waiting on <Tool> for …"; amber over R-T24, red with "possibly stuck" over R-T23, and the needs-a-look strip shows "1 agent waiting on a tool over 10m" | F-4.6 F-4.7 a live workflow: running, one agent waiting on a tool, phases from the script; F-4.6 F-4.7 F-4.8 R-T24 a live workflow: phase not started, a long wait in amber, ● in the title; F-4.7 F-4.8 R-T23 a tool wait over 10 minutes is red, possibly stuck, flagged, and ⚠ in the title |
+| F-4.8 | X2 | open it | the page title starts with `●`, or `⚠` when a wait is over R-T23 | F-4.6 F-4.7 F-4.8 R-T24 a live workflow: phase not started, a long wait in amber, ● in the title; F-4.7 F-4.8 R-T23 a tool wait over 10 minutes is red, possibly stuck, flagged, and ⚠ in the title |
+| F-4.9 | X2 open | wait | the view refreshes per R-T20; an expanded tool call and the scroll position stay as they were | F-4.9 R-T20 a live run refreshes and keeps what was opened and where it was scrolled |
+| F-4.10 | X3 | open it | status `stopped`; unfinished agents are `stopped` (R-T1) | F-4.10 R-T1 a workflow quiet past the live window is stopped, and so are its unfinished agents; F-9.2 F-2.3 F-4.10 R-T25 a run that stops is told once and its notice opens it, home lists it under Needs a look |
 
 ## 5. Plain subagents
 
@@ -81,68 +81,68 @@ Given X1, X2, X3, X4. Open `/`.
 |---|---|---|---|---|
 | F-5.1 | X4 | open it | the name is the latest `ai-title`; columns Running, Done, Stopped, empty ones hidden | F-5.1 F-5.2 F-5.3 plain subagents: handback, text answer, working, usage limit |
 | F-5.2 | X4 | open it | the background agent is Done with the handback message as its Result; the foreground one is Done with its last text | F-5.1 F-5.2 F-5.3 plain subagents: handback, text answer, working, usage limit |
-| F-5.3 | X4 | open it | the API-error agent is stopped with a red "usage limit" flag, and the strip leads with "1 agent hit a usage limit (…reset time…)" | F-5.1 F-5.2 F-5.3 plain subagents: handback, text answer, working, usage limit |
+| F-5.3 | X4 | open it | the API-error agent is stopped with a red "usage limit" flag, and the strip leads with "1 agent hit a usage limit (…reset time…)" | F-5.1 F-5.2 F-5.3 plain subagents: handback, text answer, working, usage limit; F-5.3 a usage limit shows on the card and leads the needs-a-look strip |
 | F-5.4 | X4, a done agent | append a user prompt line to its transcript | within one poll it is Running and has no result | F-5.4 R-T2 a resumed subagent runs again |
 
 ## 6. Agent drawer
 
 | ID | Given | When | Then | Test |
 |---|---|---|---|---|
-| F-6.1 | a run open | click a card | the drawer opens on **Result** when there is one, else **Transcript**; the hash becomes `#<session>/<runId>/<agentId>` | — |
-| F-6.2 | drawer open | switch tabs and filters | **Task** shows the first prompt; **Transcript** shows the task row, agent text as Markdown, and tool rows with name, label, duration, output line count; errors red. Filters **All / Agent only / Errors** work and are remembered (R-U7) | — |
-| F-6.3 | a transcript | expand a tool row | Input as labelled fields; Output as a table or pretty JSON for JSON, Markdown for prose tools, code highlighted by file extension (R-L24) | — |
-| F-6.4 | a transcript | click a step's link button | copies a URL ending `/<step>`; opening it scrolls to and opens that step, highlighted | — |
-| F-6.5 | drawer open | `j`/`k`, ↓/↑, `p`/`r`/`t`, `?`, Esc | next/previous agent; tabs; the key list; Esc closes and restores the hash to the run | — |
-| F-6.6 | runs opened in turn | Back / Forward, or paste a hash | moves between runs; a pasted hash opens the same run and agent | — |
+| F-6.1 | a run open | click a card | the drawer opens on **Result** when there is one, else **Transcript**; the hash becomes `#<session>/<runId>/<agentId>` | F-6.1 F-6.2 R-U7 the drawer opens on Result or Transcript, tabs and transcript filters work and are kept |
+| F-6.2 | drawer open | switch tabs and filters | **Task** shows the first prompt; **Transcript** shows the task row, agent text as Markdown, and tool rows with name, label, duration, output line count; errors red. Filters **All / Agent only / Errors** work and are remembered (R-U7) | F-6.1 F-6.2 R-U7 the drawer opens on Result or Transcript, tabs and transcript filters work and are kept |
+| F-6.3 | a transcript | expand a tool row | Input as labelled fields; Output as a table or pretty JSON for JSON, Markdown for prose tools, code highlighted by file extension (R-L24) | F-6.3 a tool row opens to labelled input and highlighted output |
+| F-6.4 | a transcript | click a step's link button | copies a URL ending `/<step>`; opening it scrolls to and opens that step, highlighted | F-6.4 a step's link button copies a link that opens that step |
+| F-6.5 | drawer open | `j`/`k`, ↓/↑, `p`/`r`/`t`, `?`, Esc | next/previous agent; tabs; the key list; Esc closes and restores the hash to the run | F-6.5 keys: j/k and arrows step agents, p/r/t switch tabs, ? lists keys, Esc closes and restores the hash |
+| F-6.6 | runs opened in turn | Back / Forward, or paste a hash | moves between runs; a pasted hash opens the same run and agent | F-6.6 Back and Forward move between runs, a pasted link opens the run and agent |
 
 ## 7. CLI batch (big run)
 
 | ID | Given | When | Then | Test |
 |---|---|---|---|---|
 | F-7.1 | X5 | list runs | one run named `Claude ×40: <role>` (R-L8), grouped per R-L9, R-T7, R-T8 | F-7.1 F-7.3 F-7.6 R-T7 40 claude -p runs are one batch, named by their role, with two one-word answers |
-| F-7.2 | X5 | open it | with over R-L20 agents the board is a **Table**: #, label without the common prefix (R-L25), tokens, took, start of the result | — |
-| F-7.3 | X5 | open it | shape filters show counts: All 40, Answers, Empty or one word 2 (R-L22), Running, Stopped; the search box filters by label and result | F-7.1 F-7.3 F-7.6 R-T7 40 claude -p runs are one batch, named by their role, with two one-word answers |
-| F-7.4 | X5 | scroll the table | the first rows show, and **Show more** adds more (R-L21) | — |
-| F-7.5 | X5, drawer open | `j`/`k` | follow the filtered table order | — |
-| F-7.6 | X5, drawer open | click the terminal button | copies `claude --resume <id>` for that run | F-7.1 F-7.3 F-7.6 R-T7 40 claude -p runs are one batch, named by their role, with two one-word answers |
+| F-7.2 | X5 | open it | with over R-L20 agents the board is a **Table**: #, label without the common prefix (R-L25), tokens, took, start of the result | F-7.2 F-7.3 F-7.5 R-L20 R-L22 R-L25 a batch over 30 agents is a table, shape filters count, j/k follow the filtered rows |
+| F-7.3 | X5 | open it | shape filters show counts: All 40, Answers, Empty or one word 2 (R-L22), Running, Stopped; the search box filters by label and result | F-7.1 F-7.3 F-7.6 R-T7 40 claude -p runs are one batch, named by their role, with two one-word answers; F-7.2 F-7.3 F-7.5 R-L20 R-L22 R-L25 a batch over 30 agents is a table, shape filters count, j/k follow the filtered rows |
+| F-7.4 | X5 | scroll the table | the first rows show, and **Show more** adds more (R-L21) | F-7.4 R-L21 the table shows 100 rows and Show more adds the rest |
+| F-7.5 | X5, drawer open | `j`/`k` | follow the filtered table order | F-7.2 F-7.3 F-7.5 R-L20 R-L22 R-L25 a batch over 30 agents is a table, shape filters count, j/k follow the filtered rows |
+| F-7.6 | X5, drawer open | click the terminal button | copies `claude --resume <id>` for that run | F-7.1 F-7.3 F-7.6 R-T7 40 claude -p runs are one batch, named by their role, with two one-word answers; F-7.6 R-S12 the drawer's terminal button copies the run's resume command, its folder quoted |
 | F-7.7 | X6 | open it | share of the week is `—` (R-U4); the run with `task_complete` is Done, the other Running or Stopped by time | F-7.7 codex runs: done by task_complete, no share of the week |
 
 ## 8. Timeline
 
 | ID | Given | When | Then | Test |
 |---|---|---|---|---|
-| F-8.1 | a run | **Timeline** | one lane per agent on a shared axis, grouped by phase for workflows; running bars striped, API-error bars red | — |
-| F-8.2 | agents started hours apart | **Timeline** | idle stretches are cut per R-T29 and drawn as hatched bands labelled "N idle" | — |
-| F-8.3 | timeline shown | click a lane | that agent opens | — |
+| F-8.1 | a run | **Timeline** | one lane per agent on a shared axis, grouped by phase for workflows; running bars striped, API-error bars red | F-8.1 F-8.3 the timeline: a lane per agent by phase, running striped, a usage limit red, a lane opens its agent |
+| F-8.2 | agents started hours apart | **Timeline** | idle stretches are cut per R-T29 and drawn as hatched bands labelled "N idle" | F-8.2 R-T29 agents hours apart: the idle stretch is cut and labelled |
+| F-8.3 | timeline shown | click a lane | that agent opens | F-8.1 F-8.3 the timeline: a lane per agent by phase, running striped, a usage limit red, a lane opens its agent |
 
 ## 9. Notifications
 
 | ID | Given | When | Then | Test |
 |---|---|---|---|---|
-| F-9.1 | bell off | click the bell | asks for browser permission; refused, it stays off | — |
-| F-9.2 | bell on | a run goes from running to completed, failed or stopped | one notification; clicking it opens the run | — |
-| F-9.3 | bell on | a running run is quiet over R-T21 | one notification, and again only after it has been active in between | — |
+| F-9.1 | bell off | click the bell | asks for browser permission; refused, it stays off | F-9.1 refused permission leaves the bell off |
+| F-9.2 | bell on | a run goes from running to completed, failed or stopped | one notification; clicking it opens the run | F-9.2 F-2.3 F-4.10 R-T25 a run that stops is told once and its notice opens it, home lists it under Needs a look |
+| F-9.3 | bell on | a running run is quiet over R-T21 | one notification, and again only after it has been active in between | F-9.3 R-T21 R-U7 a quiet run is told once, and again only after it was active in between |
 
 ## 10. Theme and layout
 
 | ID | Given | When | Then | Test |
 |---|---|---|---|---|
-| F-10.1 | — | Auto / light / dark | the theme switches and is remembered (R-U7); Auto follows the system | — |
-| F-10.2 | a narrow window (R-L26) | — | the sidebar and the run are separate screens with a **Runs** back button; phases stack; the drawer is full width | — |
-| F-10.3 | Persian text | it is drawn | it gets the Persian face (R-U5) and each block its own direction (R-U6) | — |
+| F-10.1 | — | Auto / light / dark | the theme switches and is remembered (R-U7); Auto follows the system | F-10.1 R-U7 the theme switches, is remembered, and Auto follows the system |
+| F-10.2 | a narrow window (R-L26) | — | the sidebar and the run are separate screens with a **Runs** back button; phases stack; the drawer is full width | F-10.2 R-L26 a narrow window shows the sidebar and the run as separate screens |
+| F-10.3 | Persian text | it is drawn | it gets the Persian face (R-U5) and each block its own direction (R-U6) | F-10.3 R-U5 R-U6 Persian gets its face and each block its own direction |
 
 ## 11. Format warning
 
 | ID | Given | When | Then | Test |
 |---|---|---|---|---|
 | F-11.1 | X8 | `GET /api/format` after the run is read | lists each kind of surprise once, with the first file it was seen in | F-11.1 the format endpoint names each surprise once, with its file |
-| F-11.2 | X8 | open `/` | the sidebar shows "Claude Code's files look different…" naming the issues; the tooltip lists the files | — |
+| F-11.2 | X8 | open `/` | the sidebar shows "Claude Code's files look different…" naming the issues; the tooltip lists the files | F-11.2 a surprise in Claude Code's files shows a warning naming it, with the file in the tooltip |
 
 ## 12. Safety
 
 | ID | Given | When | Then | Test |
 |---|---|---|---|---|
-| F-12.1 | X7 hostile Markdown (`<img onerror>`, `javascript:` link, remote image, `<script>`) in a browser | open the transcript | no script runs, the `javascript:` link is removed, no request leaves for the remote host | — |
+| F-12.1 | X7 hostile Markdown (`<img onerror>`, `javascript:` link, remote image, `<script>`) in a browser | open the transcript | no script runs and no dialog opens, the `javascript:` link is removed; an image not in a `data:` URL is shown as `[image: <alt>]` with its address in the tooltip and is never requested, so no request leaves for the remote host and none reaches the content policy | F-12.1 R-S3 hostile Markdown runs no script, keeps no javascript: link, and reaches no other host |
 | F-12.2 | — | `GET /api/run?p=..&s=..&r=x`, a `/` in a name, `a=..` | `400` (R-S4) | F-12.2 R-S4 refuses names that leave their folder |
 | F-12.3 | — | a request with `Host: evil.example:<port>` | `403` (R-S2) | F-12.3 R-S2 refuses other hosts (DNS rebinding) |
 | F-12.4 | all fixtures | open every run and every transcript | the fixture tree is byte for byte unchanged | F-12.4 never changes the files it reads |

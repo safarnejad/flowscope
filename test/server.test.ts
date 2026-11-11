@@ -2,11 +2,12 @@
 // name starts with the ids of the checks (docs/FLOWS.md) and rules (docs/RULES.md) it checks; `bun run trace` reads
 // them. The server runs in the foreground on its own port, cache and data; nothing here touches the real ~/.claude.
 import { test, expect, beforeAll, afterAll } from "bun:test";
-import { mkdtempSync, rmSync, readdirSync, readFileSync, statSync, appendFileSync, writeFileSync, mkdirSync, symlinkSync, utimesSync, openSync, writeSync, closeSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { mkdtempSync, rmSync, readdirSync, readFileSync, statSync, appendFileSync, symlinkSync, utimesSync, openSync, writeSync, closeSync } from "node:fs";
+import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
 import { makeDemo } from "../scripts/demo";
+import { put, jl, headless } from "./fixtures";
 
 const SERVER = join(import.meta.dir, "..", "server.ts");
 const PORT = 4700 + Math.floor(Math.random() * 40);
@@ -25,14 +26,6 @@ const q = (r: any) => `p=${encodeURIComponent(r.projectKey)}&s=${r.session}&r=${
 const detail = async (r: any) => (await get(`/api/run?${q(r)}`)).json() as Promise<any>;
 const byName = async (name: string) => (await runs()).find((r) => r.name.startsWith(name));
 const env = (cache: string) => ({ ...process.env, CLAUDE_PROJECTS_DIR: data.claude, CODEX_SESSIONS_DIR: data.codex, FLOWSCOPE_CACHE: cache });
-const put = (f: string, body: string) => { mkdirSync(dirname(f), { recursive: true }); writeFileSync(f, body); };
-const jl = (xs: any[]) => xs.map((x) => JSON.stringify(x)).join("\n") + "\n";
-// A headless `claude -p` session (R-K4) with the given id, in its own folder so it forms its own batch.
-const headless = (sessionId: string, cwd: string, answer: string) => jl([
-  { type: "system", sessionId, message: { content: [{ type: "text", text: "You are a Claude agent, built on Anthropic's Claude Agent SDK." }] } },
-  { type: "user", sessionId, cwd, timestamp: new Date().toISOString(), message: { role: "user", content: "Say something." } },
-  { type: "assistant", timestamp: new Date().toISOString(), message: { id: `m-${sessionId.length}`, role: "assistant", content: [{ type: "text", text: answer }] } }]);
-
 beforeAll(async () => {
   data = makeDemo(join(dir, "data"));
   before = sum(join(dir, "data"));

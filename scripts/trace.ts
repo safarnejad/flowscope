@@ -12,7 +12,7 @@
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
-const BASELINE = 57;
+const BASELINE = 105;
 
 const ROOT = join(import.meta.dir, "..");
 const read = (f: string) => readFileSync(join(ROOT, f), "utf8");
@@ -37,8 +37,11 @@ for (const file of ["docs/FLOWS.md", "docs/RULES.md"]) {
 
 // Tests: the ids a test's name starts with.
 const tests = new Map<string, string[]>();
-for (const f of readdirSync(join(ROOT, "test")).filter((f) => f.endsWith(".test.ts"))) {
-  for (const [, name] of read(join("test", f)).matchAll(/\btest\(\s*"([^"]+)"/g)) {
+// API tests in test/*.test.ts (bun test), browser tests in e2e/*.e2e.ts (bun run e2e).
+const testFiles = [["test", ".test.ts"], ["e2e", ".e2e.ts"]].flatMap(([d, ext]) =>
+  existsSync(join(ROOT, d)) ? readdirSync(join(ROOT, d)).filter((f) => f.endsWith(ext)).map((f) => join(d, f)) : []);
+for (const f of testFiles) {
+  for (const [, name] of read(f).matchAll(/\btest\(\s*"([^"]+)"/g)) {
     const ids = name.match(/^(?:(?:F-\d+\.\d+|R-[A-Z]+\d+)\s+)+/)?.[0].trim().split(/\s+/) ?? [];
     if (!ids.length) errors.push(`test "${name}" cites no F- or R- id`);
     if (tests.has(name)) errors.push(`test "${name}" is named twice`);

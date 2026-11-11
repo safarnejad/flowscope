@@ -18,6 +18,10 @@
     "dev": "bun --hot server.ts --foreground",
     "test": "bun test",
     "trace": "bun scripts/trace.ts",
-    "demo": "bun scripts/demo.ts"
+    "demo": "bun scripts/demo.ts",
+    "e2e": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0"
   }
 }

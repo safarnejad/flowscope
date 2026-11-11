@@ -13,7 +13,7 @@
   <a href="https://github.com/safarnejad/flowscope/actions/workflows/ci.yml"><img src="https://github.com/safarnejad/flowscope/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-2f5bd3" alt="MIT license"></a>
   <img src="https://img.shields.io/badge/runtime-Bun%20%E2%89%A5%201.2-f9f1e1?logo=bun&logoColor=black" alt="Bun">
-  <img src="https://img.shields.io/badge/dependencies-0-2e8a57" alt="Zero dependencies">
+  <img src="https://img.shields.io/badge/runtime%20dependencies-0-2e8a57" alt="Zero runtime dependencies">
   <img src="https://img.shields.io/badge/build%20step-none-2e8a57" alt="No build step">
 </p>
 <p align="center">
@@ -94,7 +94,7 @@ Flowscope shows your prompts, code and tool output, so:
 | 🔒 **Read-only** | Never writes to `~/.claude` or `~/.codex` (a test checks it byte for byte). Its only output is its own cache. |
 | 🏠 **Local only** | Binds `127.0.0.1` and refuses any request not addressed to it, which blocks DNS rebinding. |
 | 🛡️ **Hostile text stays inert** | Transcripts can hold text from any web page. Everything is escaped and sanitised, and a strict Content Security Policy stops injected markup from loading or sending anything. |
-| 📦 **Zero dependencies** | One TypeScript server and a page of plain HTML and JavaScript. Nothing to `npm install`, nothing to audit but ~1,800 lines and three pinned, vendored libraries. |
+| 📦 **Zero runtime dependencies** | One TypeScript server and a page of plain HTML and JavaScript. Nothing to `npm install` to run it, nothing to audit but ~1,800 lines and three pinned, vendored libraries. |
 | 📡 **No outbound requests** | No analytics, no update checks, no CDN. The page's libraries and fonts are vendored and served by Flowscope itself, with integrity hashes; it works offline. |
 
 Details: [SECURITY.md](SECURITY.md).
@@ -185,7 +185,8 @@ Field-by-field shapes are in [docs/DATA.md](docs/DATA.md).
 
 ```sh
 bun run dev               # restarts on server changes
-bun test                  # end-to-end tests against the demo data
+bun test                  # end-to-end tests of the server against the demo data
+bun run e2e               # browser tests of the page (bun install; bunx playwright install chromium)
 bun run trace             # the docs and the tests agree; prints coverage
 ```
 
