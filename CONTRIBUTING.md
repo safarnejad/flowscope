@@ -61,3 +61,12 @@ Both build their fixtures with `scripts/demo.ts` (X1, X2, X4–X6) and `test/fix
 ## Dependencies
 
 No runtime dependencies: Flowscope runs on Bun alone, with nothing to install. The one development dependency is `@playwright/test`, pinned exactly in `package.json`, for the browser tests; it is never loaded by the server or the page. The page's libraries and fonts are vendored in `public/vendor/` at pinned versions, with Subresource Integrity hashes in `public/index.html` (R-S9). To update one, replace the file from its upstream release, update its version in docs/RULES.md and SECURITY.md, and its hash in `index.html`; the test for F-12.7 checks that hash and file agree.
+
+## Releasing
+
+Versions follow semver; before 1.0 a minor version may change behaviour, and a patch only fixes. To release:
+
+1. Set `version` in `package.json`, and commit with the docs that describe the change.
+2. `npm pack --dry-run` and check the list: `files` in `package.json` ships only `server.ts`, `public/`, `SECURITY.md`, `README.md` and `LICENSE`.
+3. `git tag v<version> && git push origin v<version>`, then a GitHub release from the tag with a short note of what changed for users.
+4. `npm publish` (2FA on).

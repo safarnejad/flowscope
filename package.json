@@ -4,14 +4,34 @@
   "description": "A live, local, read-only view of Claude Code workflows, subagents and headless Claude/Codex CLI runs.",
   "license": "MIT",
   "author": "Mahdi Safarnejad",
-  "repository": { "type": "git", "url": "https://github.com/safarnejad/flowscope.git" },
-  "keywords": ["claude-code", "codex", "agents", "workflows", "observability", "bun"],
-  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/safarnejad/flowscope.git"
+  },
+  "homepage": "https://github.com/safarnejad/flowscope#readme",
+  "bugs": {
+    "url": "https://github.com/safarnejad/flowscope/issues"
+  },
+  "keywords": [
+    "claude-code",
+    "codex",
+    "agents",
+    "workflows",
+    "observability",
+    "bun"
+  ],
   "type": "module",
   "bin": {
     "flowscope": "server.ts"
   },
-  "engines": { "bun": ">=1.2" },
+  "files": [
+    "server.ts",
+    "public/",
+    "SECURITY.md"
+  ],
+  "engines": {
+    "bun": ">=1.2"
+  },
   "scripts": {
     "start": "bun server.ts --open",
     "stop": "bun server.ts stop",
