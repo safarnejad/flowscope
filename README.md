@@ -34,8 +34,7 @@ You launched a workflow with 30 agents, or a script that fires 200 `claude -p` c
 The Claude Code extension shows little of this. **Flowscope reads the files Claude Code and Codex already write and turns them into a live board** — no hooks, no SDK, no setup, nothing sent anywhere.
 
 ```sh
-git clone https://github.com/safarnejad/flowscope && cd flowscope
-bun start        # serves http://127.0.0.1:4747 in the background and opens it
+bunx flowscope --open    # serves http://127.0.0.1:4747 in the background and opens it
 ```
 
 ## What you get
@@ -104,20 +103,27 @@ Details: [SECURITY.md](SECURITY.md).
 Needs [Bun](https://bun.sh) 1.2 or later. macOS and Linux.
 
 ```sh
-git clone https://github.com/safarnejad/flowscope && cd flowscope
-bun start                 # start in the background and open the page
-bun run stop              # stop it
+bunx flowscope --open     # run the latest release without installing: start in the background and open the page
+bunx flowscope stop       # stop it
 ```
 
-To run it from anywhere, link it once:
+To keep a `flowscope` command, install it once:
 
 ```sh
-bun link                  # in the flowscope folder
-flowscope --open          # from any folder: start (once) and open
+bun add -g flowscope      # then from any folder:
+flowscope --open          # start (once) and open
 flowscope stop
 ```
 
-Starting is idempotent: if Flowscope already answers on the port, it just says so. The link points at this folder, so a `git pull` takes effect without linking again.
+Starting is idempotent: if Flowscope already answers on the port, it just says so.
+
+From source, to change it or run unreleased work:
+
+```sh
+git clone https://github.com/safarnejad/flowscope && cd flowscope
+bun start                 # start in the background and open the page
+bun link                  # optional: a flowscope command that follows this folder, so a git pull takes effect
+```
 
 | Option | Env | Default |
 |---|---|---|
