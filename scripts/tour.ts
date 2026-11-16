@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 // Records the README's tour GIF (docs/img/tour.gif) from the made-up demo tree, never from real transcripts:
-// home, a live workflow's board, an agent's result and transcript, the timeline, and a batch of CLI runs.
+// home, a live workflow's board, an agent's result and transcript, the timeline, a batch and a series of CLI runs, and a
+// session with its conversation and subagents.
 //
 //   bun scripts/tour.ts            needs ffmpeg and the dev dependencies (bun install; bunx playwright install chromium)
 import { chromium, type Page } from "@playwright/test";
@@ -59,5 +60,19 @@ async function tour(page: Page) {
   await page.locator("#filters button", { hasText: "CLI" }).click();
   await page.locator("#runs .run", { hasText: "Claude ×40" }).click();
   await page.locator("#main header h2", { hasText: "Claude ×40" }).waitFor();
-  await pause(3);
+  await pause(2.5);
+  // An app's title call for each meeting over five days: one series, grouped by day.
+  await page.locator("#runs .run", { hasText: "Claude ×15: Give this meeting" }).click();
+  await page.locator("#main header h2", { hasText: "Claude ×15" }).waitFor();
+  await pause(2.5);
+  // Sessions: a conversation whose subagents finished days ago, still today's.
+  await page.locator("#filters button", { hasText: "Sessions" }).click();
+  await page.locator("#runs .run", { hasText: "Cheaper shipping" }).click();
+  await page.locator(".card.convo").waitFor();
+  await pause(2);
+  await page.locator(".card.convo").click();
+  await pause(2.5);
+  await page.keyboard.press("Escape");
+  await page.locator("#filters button", { hasText: "All" }).click();
+  await pause(1);
 }
