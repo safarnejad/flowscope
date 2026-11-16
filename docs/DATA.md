@@ -14,7 +14,7 @@ The page talks to the server only through these GET endpoints. All return JSON u
 | `/api/search?q=` | `{ indexing, hits }`; limits in R-L3, R-L4 |
 | `/api/format` | `FormatIssue[]` |
 
-`p` is the raw project directory name (`projectKey`), `s` the session (or CLI batch id), `r` the run id (`wf_…`, `agents`, or `cli`), `a` an agent id.
+`p` is the raw project directory name (`projectKey`), `s` the session (or CLI batch or series id), `r` the run id (`wf_…`, `session`, or `cli`), `a` an agent id, or `main` for a session's own conversation. `r=agents`, which 0.1 used for a session's subagents, answers the session.
 
 ## Errors
 
@@ -34,21 +34,24 @@ An unknown workflow or session with valid names is not an error: `/api/run` answ
 
 | Field | Type | Meaning | Shown |
 |---|---|---|---|
-| `kind` | `workflow` \| `agents` \| `cli` | run kind | sidebar kind tag, filter buttons |
+| `kind` | `workflow` \| `session` \| `cli` | run kind (0.1's `agents` is now part of `session`) | sidebar kind tag, filter buttons |
 | `tool` | `claude` \| `codex` | CLI only | kind tag |
 | `project` | string | project folder, slashes restored (approximate) | sidebar tooltip |
 | `projectKey` | string | raw folder name | sidebar project line (its end), `p=` |
-| `session` | string | session id, or CLI batch id | URL hash, `s=` |
-| `runId` | string | `wf_…`, `agents`, `cli` | URL hash, `r=` |
-| `name` | string | workflow name; session title; CLI batch name | sidebar, home tiles, run header, notifications |
+| `session` | string | session id, or CLI batch or series id | URL hash, `s=` |
+| `runId` | string | `wf_…`, `session`, `cli` | URL hash, `r=` |
+| `name` | string | workflow name; session name (R-L11); CLI batch or series name | sidebar, home tiles, run header, notifications |
 | `description` | string | workflow summary or a generated line | run header; included in run search |
 | `status` | `running` \| `completed` \| `failed` \| `stopped` | see ARCHITECTURE | badges, colours, home sections, notifications |
 | `startTime` | ms \| null | workflow final record, or the first CLI run | — |
 | `durationMs` | ms \| null | workflow final record | run "elapsed" (else computed from agents) |
 | `usage` | `Usage` | summed tokens | run stats, home "tokens today" |
 | `weekShare` | number \| null | fraction of the week's weighted usage; null for Codex | run stats; per-agent share in the drawer |
-| `agents`, `agentsDone` | number | started, finished | sidebar "N of M going", run bar |
-| `lastActivity` | ms | newest mtime in the run | sidebar time, grouping by day, quiet detection |
+| `agents`, `agentsDone` | number | started, finished; for a session, its plain subagents | sidebar "N of M going", run bar, the Agents filter (a session with `agents > 0`) |
+| `agentsRunning` | number | session only: subagents running now | sidebar "N of M agents going"; a session is quiet (R-T21) only while this is over 0 |
+| `workflows` | number | session only: workflows it launched | the workflow mark in the sidebar |
+| `series` | boolean | CLI only: a series (R-L13), not a batch | table mode (R-L20), description |
+| `lastActivity` | ms | newest mtime in the run; for a session, of its file, its subagents' and its workflows' files | sidebar time, grouping by day, quiet detection |
 
 `Usage` = `{ input, cacheWrite, cacheRead, output, weighted }`. "Tokens" on the page means `input + cacheWrite + output`; cache reads are shown separately.
 
@@ -58,12 +61,14 @@ An unknown workflow or session with valid names is not an error: `/api/run` answ
 
 | Field | Meaning | Shown |
 |---|---|---|
-| `phases` | `{ title, detail? }[]`: workflow phases; for `agents` and `cli` the fixed columns Running, Done, Stopped | board columns, phase strip, timeline groups |
+| `phases` | `{ title, detail? }[]`: workflow phases; for `session` and `cli` the fixed columns Running, Done, Stopped | board columns, phase strip, timeline groups |
 | `logs` | string[] (workflow) | Log panel |
 | `result` | any (workflow final result) | Final result panel (Markdown or JSON) |
 | `script` | string (workflow) | Script panel, highlighted |
-| `resume` | shell command (workflow, agents) | Copy resume command |
+| `resume` | shell command (workflow, session) | Copy resume command |
 | `agents` | `Agent[]` | cards, table rows, timeline lanes, drawer |
+| `main` | session only: its conversation as an `Agent` with id `main`, type `conversation`, `tools` null, its action, wait, model and peak context from the file's tail (R-L14); null when the session has no file | the **Conversation** card, the drawer |
+| `workflows` | session only: `{ session, runId, name, status, agents, agentsDone, lastActivity }[]` | **Workflows it launched** |
 
 ## Agent
 
@@ -105,6 +110,6 @@ An unknown workflow or session with valid names is not an error: `/api/run` answ
 
 | State | Where kept |
 |---|---|
-| open run, open agent, transcript step | URL hash `#<session>/<runId>[/<agentId>[/<step>]]` |
+| open run, open agent, transcript step | URL hash `#<session>/<runId>[/<agentId>[/<step>]]`; a session's conversation is agent `main`; a 0.1 hash with `/agents` opens the session |
 | theme, run filter, transcript filter, notifications on | `localStorage` (R-U7) |
 | view (board/table vs timeline), table search, shape filter, rows shown | memory only |

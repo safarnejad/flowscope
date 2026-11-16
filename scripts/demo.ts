@@ -1,7 +1,8 @@
 #!/usr/bin/env bun
 // Writes a made-up ~/.claude/projects and ~/.codex/sessions tree: a finished workflow, a live one with an agent
-// waiting on a tool, a session's plain subagents (one stopped on a usage limit), a batch of 40 `claude -p` runs and
-// two `codex exec` runs. The tests and the screenshots use it; nothing in it is real.
+// waiting on a tool, a session's plain subagents (one stopped on a usage limit), a batch of 40 `claude -p` runs,
+// two `codex exec` runs, plain conversations, and an app's `claude -p` calls over five days. The tests and the
+// screenshots use it; nothing in it is real.
 //
 //   bun scripts/demo.ts <dir>     then: CLAUDE_PROJECTS_DIR=<dir>/claude CODEX_SESSIONS_DIR=<dir>/codex bun server.ts
 import { mkdirSync, writeFileSync, utimesSync, rmSync } from "node:fs";
@@ -134,6 +135,57 @@ export function makeDemo(root: string, now = Date.now()) {
       { type: "event_msg", payload: { type: "task_complete", last_agent_message: "Both migrations are reversible; 002 needs an index on orders.total_pence." } });
     put(join(codex, "2026", "11", "10", `rollout-${id}.jsonl`), jl(lines), done ? t + MIN : now - 10_000);
   });
+  // 6. Plain conversations (X10): one live with an AI title, one from three days ago with none, named by its first
+  // prompt (after a command's echo, which is not a prompt), and one opened and left with nothing in it.
+  {
+    const live = "7d1c2f60-0000-4000-8000-000000000010", old = "7d1c2f60-0000-4000-8000-000000000011", empty = "7d1c2f60-0000-4000-8000-000000000012";
+    const look = tool("Grep", { pattern: "spring", path: `${cwd}/src` });
+    put(join(claude, project, `${live}.jsonl`), jl([
+      user(now - 25 * MIN, "Plan the spring sale: which products, what discount, and when the banner goes up.", { sessionId: live }),
+      asst(now - 24 * MIN, [{ type: "text", text: "Looking at last year's sale first." }, look]),
+      result(now - 24 * MIN, look.id, "src/sale/spring-2025.ts: export const SPRING = { discount: 0.15 }"),
+      { type: "ai-title", aiTitle: "Spring sale plan", sessionId: live },
+      asst(now - 2 * MIN, [{ type: "text", text: "Last year's sale ran 15% off for two weeks. I suggest the same, starting 3 March." }]),
+    ]), now - 2 * MIN);
+    put(join(claude, project, `${old}.jsonl`), jl([
+      user(now - 3 * 1440 * MIN, "<command-name>/clear</command-name>", { sessionId: old }),
+      user(now - 3 * 1440 * MIN + 5000, "Rename the cart module to basket everywhere, and keep the old name as an alias for one release.\n\nStart with src/checkout.", { sessionId: old }),
+      asst(now - 3 * 1440 * MIN + 60_000, [{ type: "text", text: "Renamed in 14 files; `cart` stays as an alias until 2.5." }]),
+    ]), now - 3 * 1440 * MIN + 60_000);
+    put(join(claude, project, `${empty}.jsonl`), jl([{ type: "queue-operation", operation: "enqueue", timestamp: iso(now - 2 * 1440 * MIN), sessionId: empty }]), now - 2 * 1440 * MIN);
+  }
+
+  // 7. A live conversation whose subagents finished two days ago (X11): it is dated by the conversation, not by them.
+  {
+    const session = "7d1c2f60-0000-4000-8000-000000000013", t0 = now - 2 * 1440 * MIN, dir = join(claude, project, session, "subagents");
+    ["survey the shipping rules", "list the carriers we use"].forEach((description, i) => {
+      const id = `d${(0x4000 + i).toString(16)}d0e1f2a3b4c5`;
+      put(join(dir, `agent-${id}.meta.json`), JSON.stringify({ agentType: "Explore", description }), t0 + (i + 1) * MIN);
+      put(join(dir, `agent-${id}.jsonl`), jl([user(t0, `Please ${description}.`), asst(t0 + 40_000, [{ type: "text", text: `Done: ${description}, three notes.` }])]), t0 + (i + 1) * MIN);
+    });
+    put(join(claude, project, `${session}.jsonl`), jl([
+      user(t0 - MIN, "Work out a cheaper shipping plan; use agents to survey the rules and the carriers.", { sessionId: session }),
+      { type: "ai-title", aiTitle: "Cheaper shipping", sessionId: session },
+      asst(t0 + 3 * MIN, [{ type: "text", text: "Both surveys are back. Shall I draft the plan?" }]),
+      user(now - 4 * MIN, "Yes, draft it now.", { sessionId: session }),
+      asst(now - 3 * MIN, [{ type: "text", text: "Drafting the plan: two carriers, one rate table." }]),
+    ]), now - 3 * MIN);
+  }
+
+  // 8. An app that asks \`claude -p\` for each meeting's notes and title, from the meeting's own folder, over five days
+  // (X12): 15 title calls and 15 notes calls, each pair started together, days apart. Two series, not 15 batches.
+  for (let i = 0; i < 15; i++) {
+    const d = new Date(now - (5 - Math.floor(i / 3)) * 1440 * MIN), slug = `${d.toISOString().slice(0, 10)}-meeting-${i % 3 + 1}`;
+    const where = `/home/dev/projects/desk/items/${slug}`, folder = where.replace(/[^A-Za-z0-9]/g, "-"), t = now - (5 - Math.floor(i / 3)) * 1440 * MIN + (i % 3) * 90 * MIN;
+    const said = `Ana: let's move the launch to ${10 + i} March. Ben: fine, if the banner is ready.`;
+    const call = (id: string, prompt: string, answer: string, at: number) => put(join(claude, folder, `${id}.jsonl`), jl([
+      { type: "system", sessionId: id, message: { content: [{ type: "text", text: "You are a Claude agent, built on Anthropic's Claude Agent SDK." }] } },
+      { type: "user", sessionId: id, cwd: where, timestamp: iso(at), message: { role: "user", content: prompt } },
+      asst(at + 8000, [{ type: "text", text: answer }], usage(900, 40))]), at + 8000);
+    call(`6a7e0000-0000-4000-8000-${String(i).padStart(12, "0")}`, `You write the notes of a meeting for ${["Ana", "Ben", "Cyrus"][i % 3]}. Someone reading them a week later must know what was decided.\n\n${said}`,
+      `## Decided\n\n- Launch moves to ${10 + i} March, if the banner is ready.`, t);
+    call(`7a7e0000-0000-4000-8000-${String(i).padStart(12, "0")}`, `Give this meeting a short title from what was said.\n\n${said}`, `Launch moves to ${10 + i} March`, t + 40_000);
+  }
   return { claude, codex };
 }
 

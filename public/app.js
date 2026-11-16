@@ -84,10 +84,27 @@ function setHTML(el, html) {
 }
 const badge = (s) => `<span class="badge ${s} ${s === "running" ? "pulse" : ""}">${s}</span>`;
 const q = (r) => `p=${encodeURIComponent(r.projectKey)}&s=${r.session}&r=${r.runId}`;
-// A session's plain subagents all share the run id "agents", so a run is known by its session too.
+// Every session has the run id "session", so a run is known by its session too.
 const key = (r) => `${r.session}/${r.runId}`;
 let runs = [], sel = null, run = null, agentSel = null, tab = "result";
-let filter = (() => { try { return localStorage.getItem("flowscope.filter") || "all"; } catch { return "all"; } })();
+// The kind filters. Agents are the sessions that launched subagents. A value kept by 0.1 ("workflow", "agents",
+// "cli") means the same here; anything else falls back to All (R-U7).
+const FILTERS = [["all", "All"], ["session", "Sessions"], ["agents", "Agents"], ["workflow", "Workflows"], ["cli", "CLI"]];
+const passes = (r, f) => f === "all" || (f === "agents" ? r.kind === "session" && r.agents > 0 : r.kind === f);
+let filter = (() => { try { const f = localStorage.getItem("flowscope.filter"); return FILTERS.some(([k]) => k === f) ? f : "all"; } catch { return "all"; } })();
+// The conversation of a session, opened like one of its agents.
+const MAIN = "main";
+const agentOf = (id) => id === MAIN ? run?.main : run?.agents.find((a) => a.agentId === id);
+// A conversation is quiet whenever its person is reading or thinking; it counts as quiet only while a subagent of it runs.
+const idleFor = (r) => Date.now() - r.lastActivity;
+const isQuiet = (r) => r.status === "running" && idleFor(r) > 600_000 && !(r.kind === "session" && !r.agentsRunning);
+const kindOf = (r) => r.kind === "cli" ? r.tool : r.kind;
+const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+// What a session launched, as small marks beside its kind: subagents and workflows.
+const marks = (r) => r.kind !== "session" ? "" : (r.agents ? `<span class="mark" title="Launched ${plural(r.agents, "subagent")}" aria-label="Launched ${plural(r.agents, "subagent")}">${icon("agents")}</span>` : "")
+  + (r.workflows ? `<span class="mark" title="Launched ${plural(r.workflows, "workflow")}" aria-label="Launched ${plural(r.workflows, "workflow")}">${icon("flow")}</span>` : "");
+// "N of M going" for a run with agents; a running conversation without subagents just runs.
+const going = (r) => r.kind === "session" ? (r.agents ? ` ${r.agentsRunning} of ${plural(r.agents, "agent")} going` : "") : ` ${r.agents - r.agentsDone} of ${r.agents} going`;
 let showHistory = false, search = "";
 const RECENT = 3;
 
@@ -137,8 +154,9 @@ function notifyChanges(before) {
   const tell = (r, body) => { const n = new Notification(r.name, { body, icon: "/favicon.svg", tag: key(r) }); n.onclick = () => { window.focus(); pick(key(r)); }; };
   for (const r of runs) {
     const was = before.get(key(r));
-    if (was?.status === "running" && r.status !== "running") tell(r, { completed: "Finished", failed: "Failed", stopped: "Stopped before finishing" }[r.status] ?? r.status);
-    if (r.status === "running" && Date.now() - r.lastActivity > 600_000 && !quietTold.has(key(r))) { quietTold.add(key(r)); tell(r, `No activity for ${dur(Date.now() - r.lastActivity)}`); }
+    // A conversation coming to rest is not news unless something it launched was left unfinished.
+    if (was?.status === "running" && r.status !== "running" && !(r.kind === "session" && r.status === "completed")) tell(r, { completed: "Finished", failed: "Failed", stopped: "Stopped before finishing" }[r.status] ?? r.status);
+    if (isQuiet(r) && !quietTold.has(key(r))) { quietTold.add(key(r)); tell(r, `No activity for ${dur(Date.now() - r.lastActivity)}`); }
     if (r.status === "running" && Date.now() - r.lastActivity < 600_000) quietTold.delete(key(r));
   }
 }
@@ -153,15 +171,15 @@ const day = (t) => { const d = new Date(t), n = new Date(); const k = (x) => x.t
   if (k(d) === k(n)) return "Today"; n.setDate(n.getDate() - 1); if (k(d) === k(n)) return "Yesterday";
   return d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" }); };
 const row = (r) => `<div class="run s-${r.status} ${sel && key(sel) === key(r) ? "sel" : ""}" data-act="pick" data-key="${esc(key(r))}">
-  <b dir="auto">${esc(r.name)}</b><div class="small meta">${r.status === "running" ? `${badge("running")} ${r.agents - r.agentsDone} of ${r.agents} going${Date.now() - r.lastActivity > 600_000 ? ` <span class="w-amber">· quiet ${dur(Date.now() - r.lastActivity)}</span>` : ""}` : `<span class="st ${r.status}">${{ completed: "✓", failed: "✕", stopped: "■" }[r.status] ?? ""}</span>`}
-  <span class="kind">${r.kind === "cli" ? r.tool : r.kind}</span> ${when(r.lastActivity)}</div>
+  <b dir="auto">${esc(r.name)}</b><div class="small meta">${r.status === "running" ? `${badge("running")}${going(r)}${isQuiet(r) ? ` <span class="w-amber">· quiet ${dur(idleFor(r))}</span>` : ""}` : `<span class="st ${r.status}">${{ completed: "✓", failed: "✕", stopped: "■" }[r.status] ?? ""}</span>`}
+  <span class="kind">${kindOf(r)}</span>${marks(r)} ${when(r.lastActivity)}</div>
   <div class="small proj" title="${esc(r.project)}">${esc(projectTail(r))}</div></div>`;
 const section = (title, rs) => rs.length ? `<div class="sec">${title}</div>${rs.map(row).join("")}` : "";
 // Home is what is happening now: running runs, then the last few finished. The rest is history, grouped by day.
 function drawRuns() {
-  $("#filters").innerHTML = [["all", "All"], ["workflow", "Workflows"], ["agents", "Agents"], ["cli", "CLI"]].map(([f, l]) =>
+  $("#filters").innerHTML = FILTERS.map(([f, l]) =>
     `<button class="${filter === f ? "on" : ""}" data-act="filter" data-v="${f}">${l}</button>`).join("");
-  const shown = runs.filter((r) => (filter === "all" || r.kind === filter)
+  const shown = runs.filter((r) => passes(r, filter)
     && (!search || `${r.name} ${r.project} ${r.description}`.toLowerCase().includes(search)));
   const live = shown.filter((r) => r.status === "running"), past = shown.filter((r) => r.status !== "running");
   let html;
@@ -177,7 +195,9 @@ function drawRuns() {
 }
 const byDay = (rs) => { const g = new Map(); for (const r of rs) { const d = day(r.lastActivity); g.set(d, [...(g.get(d) ?? []), r]); }
   return [...g].map(([d, xs]) => section(d, xs)).join(""); };
-function pick(k, push = true) { const r = runs.find((x) => key(x) === k); if (!r) return; sel = r; closeDrawer();
+// A session that launched nothing is its conversation: picking it opens that in the drawer at once.
+let autoOpen = false;
+function pick(k, push = true, auto = true) { const r = runs.find((x) => key(x) === k); if (!r) return; sel = r; closeDrawer(); autoOpen = auto;
   if (push && location.hash.slice(1) !== k) history.pushState(null, "", "#" + k);
   document.body.classList.add("show-main");
   if (!showHistory && runs.filter((x) => x.status !== "running").slice(RECENT).includes(r)) showHistory = true;
@@ -189,10 +209,10 @@ function renderHome() {
   const live = runs.filter((r) => r.status === "running");
   const today = runs.filter((r) => day(r.lastActivity) === "Today");
   const todayTok = today.reduce((n, r) => n + r.usage.input + r.usage.cacheWrite + r.usage.output, 0);
-  const quiet = live.filter((r) => Date.now() - r.lastActivity > 600_000);
+  const quiet = live.filter(isQuiet);
   const bad = runs.filter((r) => (r.status === "failed" || r.status === "stopped") && Date.now() - r.lastActivity < 86400_000);
   const tile = (r, note) => `<div class="hcard s-${r.status}" data-act="pick" data-key="${esc(key(r))}"><b dir="auto">${esc(r.name)}</b>
-    <div class="small">${r.status === "running" ? `${badge("running")} ${r.agents - r.agentsDone} of ${r.agents} going${Date.now() - r.lastActivity > 600_000 ? ` <span class="w-amber">· quiet ${dur(Date.now() - r.lastActivity)}</span>` : ""}` : `<span class="st ${r.status}">${r.status}</span>`} · <span class="kind">${r.kind === "cli" ? r.tool : r.kind}</span> · ${when(r.lastActivity)}</div>
+    <div class="small">${r.status === "running" ? `${badge("running")}${going(r)}${isQuiet(r) ? ` <span class="w-amber">· quiet ${dur(idleFor(r))}</span>` : ""}` : `<span class="st ${r.status}">${r.status}</span>`} · <span class="kind">${kindOf(r)}</span>${marks(r)} · ${when(r.lastActivity)}</div>
     ${note ? `<div class="small w-amber">${note}</div>` : ""}<div class="small proj">${esc(projectTail(r))}</div></div>`;
   setHTML($("#main"), `<header><h2>Now</h2><div class="small">${live.length} running · ${today.length} active today · ${tok(todayTok)} tokens in today's runs</div></header>
     ${quiet.length || bad.length ? `<h3 class="hh">Needs a look</h3><div class="hgrid">${quiet.map((r) => tile(r, `no activity for ${dur(Date.now() - r.lastActivity)}`)).join("")}${bad.map((r) => tile(r, r.status === "failed" ? "failed" : "stopped before finishing")).join("")}</div>` : ""}
@@ -204,6 +224,7 @@ async function loadRun() {
   if (!sel) return;
   run = await (await fetch("/api/run?" + q(sel))).json();
   renderRun();
+  if (autoOpen) { autoOpen = false; if (run.kind === "session" && run.main && !run.agents.length && !run.workflows.length && !agentSel) openAgent(MAIN, "transcript"); }
 }
 // Draws the run already loaded; the table's search and paging redraw without fetching again.
 function renderRun() {
@@ -222,8 +243,9 @@ function renderRun() {
   const stopped = run.agents.filter((a) => a.state === "stopped");
   const thin = run.agents.filter((a) => a.state === "done" && shape(a) === "short");
   const attention = [[silent, "silent over 10m", "running"], [stuck, "waiting on a tool over 10m", "running"], [stopped, "stopped", "stopped"], [thin, "with an empty or one-word result", "short"]].filter(([l]) => l.length);
-  // Many agents in few columns reads better as a table: one row each, with the start of its result (R-L20).
-  const big = run.agents.length > 30;
+  // Many agents in few columns reads better as a table: one row each, with the start of its result (R-L20); so does
+  // a series, whose runs are days apart.
+  const big = isTable();
   // A workflow's progress is its phases: done, active (something running), or still to come.
   const phased = run.kind === "workflow" && cols.length > 1;
   const phaseStates = cols.map((p) => { const as = run.agents.filter((a) => (a.phase || "—") === p.title);
@@ -232,27 +254,35 @@ function renderRun() {
   const waits = run.agents.filter((a) => a.waiting).map((a) => Date.now() - a.waiting.since);
   const longest = Math.max(0, ...waits);
   document.title = run.status === "running" ? `${waits.length && longest > 600_000 ? "⚠ " : "● "}${run.name} · Flowscope` : "Flowscope";
-  const elapsed = run.durationMs ?? (run.agents.length ? run.lastActivity - Math.min(...run.agents.map((a) => a.startedAt)) : null);
+  const session = run.kind === "session", m = run.main, hasAgents = run.agents.length > 0;
+  const elapsed = run.durationMs ?? (session && m ? run.lastActivity - m.startedAt : run.agents.length ? run.lastActivity - Math.min(...run.agents.map((a) => a.startedAt)) : null);
+  // A workflow names the conversation it was launched from, when that is listed.
+  const from = run.kind === "workflow" ? runs.find((x) => key(x) === `${run.session}/session`) : null;
   const limited = run.agents.filter((a) => a.apiError);
   if (limited.length) attention.unshift([limited, limited[0].apiError.kind === "rate_limit" ? `hit a usage limit (${limited[0].apiError.text.replace(/^.*?·\s*/, "")})` : "ended on an API error", "stopped"]);
   const view = runView === "timeline" ? "timeline" : big ? "table" : "board";
-  setHTML($("#main"), `<button class="back" data-act="home">${icon("prev")}Runs</button><header><h2 dir="auto">${esc(run.name)} ${badge(run.status)}</h2><div class="small" dir="auto">${esc(run.description)}</div></header>
-    <div class="stats"><div><b>${done}/${run.agents.length}</b>done of started</div><div><b>${run.agents.filter((a) => a.state === "running").length}</b>running now</div>
+  setHTML($("#main"), `<button class="back" data-act="home">${icon("prev")}Runs</button><header><h2 dir="auto">${esc(run.name)} ${badge(run.status)}</h2><div class="small" dir="auto">${esc(run.description)}</div>
+    ${from ? `<div class="small from">Launched from <button class="linkbtn" data-act="pick" data-key="${esc(key(from))}" dir="auto">${icon("chat")}${esc(from.name)}</button></div>` : ""}</header>
+    <div class="stats">${!session || hasAgents ? `<div><b>${done}/${run.agents.length}</b>${session ? "subagents done" : "done of started"}</div><div><b>${run.agents.filter((a) => a.state === "running").length}</b>running now</div>` : ""}
     ${waits.length ? `<div class="${waitClass(longest)}"><b>${dur(longest)}</b>longest tool wait${waits.length > 1 ? ` (${waits.length} waiting)` : ""}</div>` : ""}
     <div><b>${dur(elapsed)}</b>elapsed</div><div title="input ${tok(run.usage.input)} · cache writes ${tok(run.usage.cacheWrite)} · output ${tok(run.usage.output)}"><b>${tok(run.usage.input + run.usage.cacheWrite + run.usage.output)}</b>tokens</div>
     <div><b>${tok(run.usage.cacheRead)}</b>cache reads</div>
     ${run.weekShare == null ? "" : `<div title="Cost-weighted share of all Claude Code usage on this machine in the last 7 days"><b>${pct(run.weekShare)}</b>of this week's usage</div>`}<div><b>${when(run.lastActivity)}</b>last activity</div></div>
-    ${phased ? `<div class="segs">${phaseStates.map(([p, st]) => `<div class="seg ${st}" title="${esc(p.title)}: ${st}"></div>`).join("")}</div>
+    ${session ? conversation() : ""}
+    ${session && run.workflows.length ? `<h3 class="hh">Workflows it launched</h3><div class="hgrid">${run.workflows.map((w) => `<div class="hcard s-${w.status}" data-act="pick" data-key="${esc(key(w))}"><b dir="auto">${icon("flow")}${esc(w.name)}</b>
+      <div class="small"><span class="st ${w.status}">${w.status}</span> · ${w.agentsDone}/${w.agents} agents · ${when(w.lastActivity)}</div></div>`).join("")}</div>` : ""}
+    ${session && hasAgents ? `<h3 class="hh">Subagents</h3>` : ""}
+    ${session && !hasAgents ? "" : phased ? `<div class="segs">${phaseStates.map(([p, st]) => `<div class="seg ${st}" title="${esc(p.title)}: ${st}"></div>`).join("")}</div>
       <div class="small segl">Phase ${Math.max(1, phaseStates.findLastIndex(([, st]) => st !== "pending") + 1)} of ${cols.length}${activePhase ? ` · ${esc(activePhase)}` : ""}</div>`
     : `<div class="bar"><i style="width:${run.agents.length ? done / run.agents.length * 100 : 0}%"></i></div>`}
-    <div class="viewbar"><span class="tabs filters">${[[big ? "table" : "board", big ? "Table" : "Board"], ["timeline", "Timeline"]].map(([k, l]) => `<button class="${view === k ? "on" : ""}" data-act="view" data-v="${k}">${l}</button>`).join("")}</span>
+    <div class="viewbar">${!session || hasAgents ? `<span class="tabs filters">${[[big ? "table" : "board", big ? "Table" : "Board"], ["timeline", "Timeline"]].map(([k, l]) => `<button class="${view === k ? "on" : ""}" data-act="view" data-v="${k}">${l}</button>`).join("")}</span>` : "<span></span>"}
       ${run.resume ? `<button class="cmdbtn" data-act="copyResume" title="${esc(run.resume)}">Copy resume command</button>` : ""}</div>
     ${attention.length ? `<div class="attn">${attention.map(([l, what, sh]) => `<button ${big ? `data-act="shape" data-v="${sh}"` : `data-act="agent" data-agent="${esc(l[0].agentId)}"`}><b>${l.length}</b> ${l.length === 1 ? "agent" : "agents"} ${what}</button>`).join("")}</div>` : ""}
-    ${view === "timeline" ? timeline(cols) : big ? batchTable() : `<div class="phases">${shownCols.map((p) => {
+    ${session && !hasAgents ? "" : view === "timeline" ? timeline(cols) : big ? batchTable() : `<div class="phases">${shownCols.map((p) => {
       const as = run.agents.filter((a) => (a.phase || "—") === p.title);
       return `<div class="phase"><h3 dir="auto">${esc(p.title)} <span class="small">${as.length ? `${as.filter((a) => a.state === "done").length}/${as.length}` : "not started"}</span></h3><div class="small" dir="auto">${esc(p.detail || "")}</div>
         ${as.map((a) => `<div class="card ${a.state}" data-act="agent" data-agent="${esc(a.agentId)}"><div class="lbl" dir="auto" title="${esc(a.label || a.agentId)}">${esc(a.label || a.agentId)}</div>
-        <div class="small">${a.type ? `<span class="kind">${esc(a.type)}</span> ` : ""}${a.state === "done" ? "" : badge(a.state) + " "}${flags(a)}${a.tools} tools · ${tok(a.usage.input + a.usage.cacheWrite + a.usage.output)}${a.peakContext ? ` · <span title="the most context one request carried">ctx ${tok(a.peakContext)}</span>` : ""} · ${a.state === "running" ? when(a.lastActivity) : `<span title="ended ${new Date(a.lastActivity).toLocaleString()}">${dur(took(a))}</span>`}</div>${a.waiting ? `<div class="now wait ${waitClass(Date.now() - a.waiting.since)}">⏳ waiting on ${esc(a.waiting.tool)} for ${dur(Date.now() - a.waiting.since)}${Date.now() - a.waiting.since > 600_000 ? " · possibly stuck" : ""}</div>` : ""}${a.state === "running" && a.now ? `<div class="now" dir="auto" title="${esc(a.now)}">${esc(nowText(a.now))}</div>` : ""}${a.state !== "running" ? `<i class="db" style="width:${(took(a) / slowest * 100).toFixed(1)}%" title="took ${dur(took(a))}; the slowest took ${dur(slowest)}"></i>` : ""}</div>`).join("") || ""}</div>`;
+        <div class="small">${a.type ? `<span class="kind">${esc(a.type)}</span> ` : ""}${a.state === "done" ? "" : badge(a.state) + " "}${flags(a)}${a.tools != null ? `${a.tools} tools · ` : ""}${tok(a.usage.input + a.usage.cacheWrite + a.usage.output)}${a.peakContext ? ` · <span title="the most context one request carried">ctx ${tok(a.peakContext)}</span>` : ""} · ${a.state === "running" ? when(a.lastActivity) : `<span title="ended ${new Date(a.lastActivity).toLocaleString()}">${dur(took(a))}</span>`}</div>${a.waiting ? `<div class="now wait ${waitClass(Date.now() - a.waiting.since)}">⏳ waiting on ${esc(a.waiting.tool)} for ${dur(Date.now() - a.waiting.since)}${Date.now() - a.waiting.since > 600_000 ? " · possibly stuck" : ""}</div>` : ""}${a.state === "running" && a.now ? `<div class="now" dir="auto" title="${esc(a.now)}">${esc(nowText(a.now))}</div>` : ""}${a.state !== "running" ? `<i class="db" style="width:${(took(a) / slowest * 100).toFixed(1)}%" title="took ${dur(took(a))}; the slowest took ${dur(slowest)}"></i>` : ""}</div>`).join("") || ""}</div>`;
     }).join("")}</div>`}
     ${run.logs.length ? `<details open><summary>Log</summary><pre>${esc(run.logs.join("\n"))}</pre></details>` : ""}
     ${run.result ? `<details><summary>Final result</summary>${md(typeof run.result === "string" ? run.result : JSON.stringify(run.result))}</details>` : ""}
@@ -260,6 +290,15 @@ function renderRun() {
   if (agentSel) renderDrawer();
 }
 
+// A session's own conversation, as one wide card above what it launched; it opens in the drawer like an agent.
+function conversation() {
+  const a = run.main;
+  if (!a) return "";
+  return `<div class="card convo ${a.state}" data-act="agent" data-agent="${MAIN}"><div class="lbl">${icon("chat")}Conversation</div>
+    <div class="small">${a.state === "running" ? badge("running") + " " : ""}${flags(a)}${a.model ? `<span class="kind">${esc(a.model)}</span> ` : ""}${tok(a.usage.input + a.usage.cacheWrite + a.usage.output)} tokens${a.peakContext ? ` · <span title="the most context one request carried, among the latest">ctx ${tok(a.peakContext)}</span>` : ""} · started ${when(a.startedAt)} · last ${when(a.lastActivity)}</div>
+    ${a.waiting ? `<div class="now wait ${waitClass(Date.now() - a.waiting.since)}">⏳ waiting on ${esc(a.waiting.tool)} for ${dur(Date.now() - a.waiting.since)}</div>` : ""}${a.now ? `<div class="now" dir="auto" title="${esc(a.now)}">${esc(nowText(a.now))}</div>` : ""}</div>`;
+}
+const isTable = () => run.agents.length > 30 || !!run.series;
 let runView = "board";
 // Line icons, drawn on a 16px grid in the weight of the logo, coloured by their button.
 const ICONS = {
@@ -274,6 +313,11 @@ const ICONS = {
   close: '<path d="M4 4l8 8M12 4l-8 8"/>',
   sun: '<circle cx="8" cy="8" r="2.8"/><path d="M8 1.5v1.5M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1 1M11.6 11.6l1 1M3.4 12.6l1-1M11.6 4.4l1-1"/>',
   moon: '<path d="M13 9.5A5.5 5.5 0 1 1 6.5 3a4.5 4.5 0 0 0 6.5 6.5z"/>',
+  // A session that fanned out: one node and the two it launched.
+  agents: '<circle cx="8" cy="3.6" r="1.9"/><circle cx="3.8" cy="12.4" r="1.9"/><circle cx="12.2" cy="12.4" r="1.9"/><path d="M7.1 5.3 4.7 10.6M8.9 5.3l2.4 5.3"/>',
+  // A workflow: phase columns, as on its board and in the logo.
+  flow: '<rect x="1.8" y="2.5" width="3.4" height="11" rx="1.2"/><rect x="6.3" y="2.5" width="3.4" height="7" rx="1.2"/><rect x="10.8" y="2.5" width="3.4" height="4" rx="1.2"/>',
+  chat: '<path d="M2.5 4.5a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2H7l-3 2.5v-2.5h0a1.5 1.5 0 0 1-1.5-1.5z"/>',
 };
 const icon = (n) => `<svg class="ico" viewBox="0 0 16 16" aria-hidden="true">${ICONS[n]}</svg>`;
 // An icon button that copies, and shows a tick for a moment after.
@@ -361,13 +405,15 @@ function setBatchQ(v) { batchQ = v.trim().toLowerCase(); batchN = 100; renderRun
 function batchTable() {
   const rows = tableRows();
   const pre = commonPrefix(run.agents.map((a) => a.label || ""));
+  // Runs on more than one day (a series) are grouped under the day they started.
+  const days = new Set(run.agents.map((a) => day(a.startedAt))).size > 1;
   const shapes = [["all", "All"], ["long", "Answers"], ["short", "Empty or one word"], ["running", "Running"], ["stopped", "Stopped"]]
     .map(([k, l]) => [k, l, k === "all" ? run.agents.length : run.agents.filter((a) => shape(a) === k).length]).filter(([k, , n]) => n || k === batchShape);
   return `<div class="tools"><input type="search" placeholder="Search labels and results" value="${esc(batchQ)}" data-input="batchq">
     <span class="tabs">${shapes.map(([k, l, n]) => `<button class="${batchShape === k ? "on" : ""}" data-act="shape" data-v="${k}">${l} <span class="small">${n}</span></button>`).join("")}</span>
     ${batchQ ? `<span class="small">${rows.length} match</span>` : ""}</div>
     <table class="batch"><tr><th>#</th><th>${pre ? `<span title="every label starts with this">${esc(pre)}…</span>` : "Label"}</th><th>Tokens</th><th>Took</th><th>Result</th></tr>
-    ${rows.slice(0, batchN).map((a) => `<tr class="r" data-act="agent" data-agent="${esc(a.agentId)}"><td class="s-${a.state}">${run.agents.indexOf(a) + 1}</td>
+    ${rows.slice(0, batchN).map((a, i, rs) => (days && (i === 0 || day(a.startedAt) !== day(rs[i - 1].startedAt)) ? `<tr class="dayrow"><td colspan="5">${day(a.startedAt)}</td></tr>` : "") + `<tr class="r" data-act="agent" data-agent="${esc(a.agentId)}"><td class="s-${a.state}">${run.agents.indexOf(a) + 1}</td>
       <td dir="auto" title="${esc(a.label || "")}">${esc((a.label || a.agentId).slice(pre.length))}</td><td>${tok(a.usage.input + a.usage.cacheWrite + a.usage.output)}</td>
       <td>${a.startedAt && a.lastActivity ? dur(a.lastActivity - a.startedAt) : "—"}</td>
       <td class="res" dir="${dirOf(a.result ?? a.now ?? "")}">${a.state === "done" ? esc(String(a.result ?? "").replace(/\s+/g, " ").slice(0, 200)) : a.state === "running" ? esc(a.now ?? "") : "stopped"}</td></tr>`).join("")}</table>
@@ -375,7 +421,7 @@ function batchTable() {
 }
 // Next or previous agent with the drawer open: the table's order for a big run, the cards' order otherwise.
 function stepAgent(d) {
-  const list = run.agents.length > 30 ? tableRows() : run.agents;
+  const list = isTable() ? tableRows() : run.agents;
   const i = list.findIndex((a) => a.agentId === agentSel);
   const next = list[i + d]; if (next) openAgent(next.agentId);
 }
@@ -383,7 +429,7 @@ function stepAgent(d) {
 // The address follows the open agent (and a step in its transcript), so a link opens exactly that.
 let target = null;
 async function openAgent(id, t, step = null) { agentSel = id; target = step; const b = $("#dbody"); b._html = null; b.innerHTML = ""; b.scrollTop = 0;
-  tab = t ?? (run.agents.find((a) => a.agentId === id)?.result ? "result" : "transcript"); $("#drawer").classList.add("open");
+  tab = t ?? (agentOf(id)?.result ? "result" : "transcript"); $("#drawer").classList.add("open");
   const h = `${key(sel)}/${id}${step != null ? `/${step}` : ""}`; if (location.hash.slice(1) !== h) history.replaceState(null, "", "#" + h);
   await renderDrawer();
   if (step != null) { const el = $(`#step-${step}`); if (el) { el.open = true; el.scrollIntoView({ block: "center" }); } }
@@ -494,12 +540,12 @@ function transcriptHTML(ev, live) {
 
 const taskCache = new Map();
 async function renderDrawer() {
-  const a = run.agents.find((x) => x.agentId === agentSel); if (!a) return;
+  const a = agentOf(agentSel); if (!a) return;
   const tabBtn = (k, l, key) => `<button class="${tab === k ? "on" : ""}" data-act="tab" data-v="${k}">${l} <kbd>${key}</kbd></button>`;
   setHTML($("#dhead"), `<div class="dh-top"><h2 dir="auto">${esc(a.label)}</h2>${badge(a.state)}
       <div class="dh-nav">${a.resume ? copyBtn("resume", 0, `Copy resume command: ${esc(a.resume)}`, "term") + `<span class="sep"></span>` : ""}<button class="ibtn" data-act="step" data-v="-1" title="Previous agent (K)">${icon("prev")}</button><button class="ibtn" data-act="step" data-v="1" title="Next agent (J)">${icon("next")}</button>
       <button class="ibtn" popovertarget="keys" title="Keyboard shortcuts (?)">${icon("help")}</button><button class="ibtn" data-act="close" title="Close (Esc)">${icon("close")}</button></div></div>
-    <div class="dh-meta" title="agent id ${esc(a.agentId)}">${flags(a)}${esc([a.phase, a.type, a.model, a.effort && `${a.effort} effort`, `${a.tools} tools`,
+    <div class="dh-meta" title="agent id ${esc(a.agentId)}">${flags(a)}${esc([a.phase, a.type, a.model, a.effort && `${a.effort} effort`, a.tools != null && `${a.tools} tools`,
       a.peakContext && `peak context ${tok(a.peakContext)}`, run.weekShare != null && run.usage.weighted && `${pct(a.usage.weighted / run.usage.weighted * run.weekShare)} of this week's usage`].filter(Boolean).join(" · "))}
 </div>
     <nav class="dtabs">${tabBtn("task", "Task", "P")}${tabBtn("result", "Result", "R")}${tabBtn("transcript", "Transcript", "T")}</nav>`);
@@ -542,8 +588,9 @@ applyTheme(theme); drawTheme();
 // The address names the run; following it (a pasted link, Back, Forward) opens that run, and no run means home.
 function route() { const h = decodeURIComponent(location.hash.slice(1));
   if (!h) return goHome(false);
-  const [s1, r1, agent, step] = h.split("/"), k = `${s1}/${r1}`;
-  if (!sel || key(sel) !== k) pick(k, false);
+  // A link from 0.1 to a session's subagents ("/agents") opens the session.
+  const [s1, r0, agent, step] = h.split("/"), r1 = r0 === "agents" ? "session" : r0, k = `${s1}/${r1}`;
+  if (!sel || key(sel) !== k) pick(k, false, !agent);
   if (!agent && agentSel) closeDrawer();
   if (agent && agent !== agentSel) loading.then(() => openAgent(agent, step != null ? "transcript" : undefined, step != null ? Number(step) : null));
 }
@@ -569,7 +616,7 @@ const ACTS = {
   // A copy button may sit in a step's summary: the click copies, it does not fold the step.
   copy: (d, el, e) => { e.preventDefault(); e.stopPropagation();
     const done = d.v === "step" ? copyStep(Number(d.i)) : d.v === "out" ? copyOut(Number(d.i))
-      : navigator.clipboard.writeText(run.agents.find((x) => x.agentId === agentSel).resume);
+      : navigator.clipboard.writeText(agentOf(agentSel).resume);
     Promise.resolve(done).then(() => flash(el, d.icon)).catch(() => {}); },
 };
 document.addEventListener("click", (e) => { const el = e.target.closest?.("[data-act]"); if (el && ACTS[el.dataset.act]) ACTS[el.dataset.act](el.dataset, el, e); });

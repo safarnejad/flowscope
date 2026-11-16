@@ -125,17 +125,40 @@ test("F-2.4 clicking Flowscope returns home and clears the hash", async ({ page 
 test("F-3.1 R-U7 the kind filter shows only that kind and is kept across a reload", async ({ page }) => {
   await home(page);
   await page.locator("#runs button.more").click();
-  for (const [label, kinds] of [["Workflows", ["workflow"]], ["Agents", ["agents"]], ["CLI", ["claude", "codex"]]] as const) {
+  await expect(page.locator("#filters button")).toHaveText(["All", "Sessions", "Agents", "Workflows", "CLI"]);
+  const all = await runs();
+  for (const [label, want] of [["Sessions", all.filter((r) => r.kind === "session")], ["Agents", all.filter((r) => r.kind === "session" && r.agents > 0)],
+    ["Workflows", all.filter((r) => r.kind === "workflow")], ["CLI", all.filter((r) => r.kind === "cli")]] as const) {
     await page.locator("#filters button", { hasText: label }).click();
-    const shown = await page.locator("#runs .run .kind").allTextContents();
-    expect(shown.length).toBeGreaterThan(0);
-    expect(shown.every((k) => (kinds as readonly string[]).includes(k))).toBe(true);
+    await expect(page.locator("#runs .run")).toHaveCount(want.length);
+    expect((await page.locator("#runs .run b").allTextContents()).sort()).toEqual(want.map((r) => r.name).sort());
   }
+  // Agents are the sessions that launched subagents, and nothing else.
+  await page.locator("#filters button", { hasText: "Agents" }).click();
+  expect(new Set(await page.locator("#runs .run .kind").allTextContents())).toEqual(new Set(["session"]));
   await page.locator("#filters button", { hasText: "Workflows" }).click();
   await page.reload();
   await expect(page.locator("#filters button.on")).toHaveText("Workflows");
   await expect(page.locator("#runs .run").first()).toBeVisible();
   expect(new Set(await page.locator("#runs .run .kind").allTextContents())).toEqual(new Set(["workflow"]));
+  // A choice kept by 0.1 means the same; one it never knew falls back to All.
+  for (const [kept, on] of [["agents", "Agents"], ["cli", "CLI"], ["nonsense", "All"]]) {
+    await page.evaluate((v) => localStorage.setItem("flowscope.filter", v), kept);
+    await page.reload();
+    await expect(page.locator("#filters button.on")).toHaveText(on);
+  }
+});
+
+test("F-3.5 in All, a session shows a mark for the subagents and the workflows it launched", async ({ page }) => {
+  await home(page);
+  await page.locator("#runs button.more").click();
+  const row = (name: string) => page.locator("#runs .run", { has: page.locator("b", { hasText: new RegExp(`^${name}$`) }) });
+  await expect(row("Payments clean-up").locator(".mark")).toHaveCount(1);
+  await expect(row("Payments clean-up").locator(".mark")).toHaveAttribute("title", "Launched 4 subagents");
+  await expect(row("Money migration").locator(".mark")).toHaveAttribute("title", "Launched 1 workflow");
+  await expect(row("Spring sale plan").locator(".mark")).toHaveCount(0);
+  await expect(row("money-migration").locator(".mark")).toHaveCount(0);
+  await shot(page, "marks");
 });
 
 test("F-3.2 F-3.3 F-3.4 search: names by day, then hits inside transcripts that open the agent", async ({ page }) => {
@@ -144,7 +167,9 @@ test("F-3.2 F-3.3 F-3.4 search: names by day, then hits inside transcripts that 
   await expect(page.locator("#search")).toBeFocused();
   await page.keyboard.type("money");
   await expect(page.locator("#runs .sec").first()).toHaveText("Today");
-  await expect(page.locator("#runs .run b")).toHaveText(["money-migration"]);
+  // The workflow and the conversation that launched it.
+  await expect(page.locator("#runs .run b")).toHaveCount(2);
+  expect((await page.locator("#runs .run b").allTextContents()).sort()).toEqual(["Money migration", "money-migration"]);
   await page.locator("#search").fill("pennies");
   await expect(page.locator("#runs")).toContainText("No run's name matches");
   // The index is read on the first search; until then the list says so, then shows the hits.
@@ -216,6 +241,9 @@ test("F-4.9 R-T20 a live run refreshes and keeps what was opened and where it wa
   const before = await page.locator("#main").evaluate((m) => (m as any)._html);
   // A running agent's transcript is drawn again on each poll too.
   await card.click();
+  // Clicking may scroll the card into view; that place is what must hold.
+  const top = await page.locator("#main").evaluate((m) => m.scrollTop);
+  expect(top).toBeGreaterThanOrEqual(200);
   await expect(page.locator(".dtabs button.on")).toContainText("Transcript");
   const call = page.locator("#dbody details.call", { has: page.locator(".chip", { hasText: "Read" }) });
   await call.locator("summary").first().click();
@@ -223,7 +251,7 @@ test("F-4.9 R-T20 a live run refreshes and keeps what was opened and where it wa
   // One poll later the run has been drawn again.
   await expect.poll(() => page.locator("#main").evaluate((m) => (m as any)._html), { timeout: 8_000 }).not.toBe(before);
   await expect(script).toHaveAttribute("open", "");
-  expect(await page.locator("#main").evaluate((m) => m.scrollTop)).toBe(200);
+  expect(await page.locator("#main").evaluate((m) => m.scrollTop)).toBe(top);
   await expect(call).toHaveAttribute("open", "");
   await expect(card).toBeVisible();
 });
@@ -505,6 +533,87 @@ test("F-10.3 R-U5 R-U6 Persian gets its face and each block its own direction", 
   // The bullets sit on the right of a Persian list.
   expect(await md.locator("li").first().evaluate((e) => getComputedStyle(e).direction)).toBe("rtl");
   await shot(page, "rtl-result");
+});
+
+test("F-14.3 a session that launched nothing opens on its conversation, and Esc shows its page", async ({ page }) => {
+  await home(page);
+  const r = await byName("Spring sale plan");
+  await page.locator("#runs .run", { hasText: "Spring sale plan" }).click();
+  await expect(page.locator("#drawer")).toHaveClass(/open/);
+  await expect(page.locator("#dhead h2")).toHaveText("Spring sale plan");
+  await expect(page.locator(".dtabs button.on")).toContainText("Transcript");
+  await expect(page.locator("#dbody details.task")).toContainText("Plan the spring sale");
+  await expect(page.locator("#dbody .say").last()).toContainText("starting 3 March");
+  expect(new URL(page.url()).hash).toBe(`#${r.session}/session/main`);
+  await shot(page, "conversation");
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#drawer")).not.toHaveClass(/open/);
+  expect(new URL(page.url()).hash).toBe(`#${r.session}/session`);
+  await expect(page.locator("#main .card.convo")).toContainText("Conversation");
+  // No subagents: no board, no done-of-started count.
+  await expect(page.locator("#main .phases")).toHaveCount(0);
+  await expect(page.locator("#main .stats")).not.toContainText("done of started");
+});
+
+test("F-14.4 R-L14 a session with subagents shows its conversation above its subagents' board", async ({ page }) => {
+  await open(page, "Cheaper shipping");
+  await expect(page.locator("#drawer")).not.toHaveClass(/open/);
+  const convo = page.locator("#main .card.convo");
+  await expect(convo).toContainText("Drafting the plan");
+  await expect(page.locator("#main h3.hh")).toHaveText(["Subagents"]);
+  await expect(page.locator("#main .card:not(.convo)")).toHaveCount(2);
+  await expect(page.locator("#main .stats")).toContainText("2/2subagents done");
+  await convo.click();
+  await expect(page.locator("#dhead h2")).toHaveText("Cheaper shipping");
+  await expect(page.locator("#dbody details.task")).toContainText("cheaper shipping plan");
+  // j goes on from the conversation to the first subagent.
+  await page.keyboard.press("j");
+  await expect(page.locator("#dhead h2")).toHaveText(/survey the shipping rules|list the carriers we use/);
+  await shot(page, "session");
+});
+
+test("F-14.5 a session lists the workflows it launched, and the workflow links back to it", async ({ page }) => {
+  await open(page, "Money migration");
+  const tile = page.locator("#main .hcard", { hasText: "money-migration" });
+  await expect(page.locator("#main h3.hh").first()).toHaveText("Workflows it launched");
+  await tile.click();
+  await expect(page.locator("#main header h2")).toContainText("money-migration");
+  const back = page.locator("#main .from .linkbtn");
+  await expect(back).toHaveText("Money migration");
+  await back.click();
+  await expect(page.locator("#main header h2")).toContainText("Money migration");
+});
+
+test("F-14.6 a link from 0.1 to a session's subagents opens the session and the agent", async ({ page }) => {
+  const r = await byName("Payments clean-up");
+  const a = (await api(`/api/run?p=${r.projectKey}&s=${r.session}&r=session`)).agents[0];
+  await page.goto(`${BASE}/#${r.session}/agents/${a.agentId}`);
+  await expect(page.locator("#main header h2")).toContainText("Payments clean-up");
+  await expect(page.locator("#dhead h2")).toHaveText(a.label);
+});
+
+test("F-14.8 R-T21 a conversation at rest needs no look, and one is quiet only while a subagent of it runs", async ({ page }) => {
+  // Spring sale plan, 12 minutes without a word: still running, but its person is only thinking.
+  const r = await byName("Spring sale plan");
+  const f = join(data.claude, r.projectKey, `${r.session}.jsonl`), t = new Date(Date.now() - 12 * MIN);
+  utimesSync(f, t, t);
+  await home(page);
+  await expect(page.locator("#runs .run", { hasText: "Spring sale plan" })).toContainText("running");
+  await expect(page.locator("#runs .run", { hasText: "Spring sale plan" })).not.toContainText("quiet");
+  const look = page.locator(".hgrid").first();
+  await expect(look.locator(".hcard", { hasText: "Long build" })).toBeVisible();
+  await expect(look.locator(".hcard", { hasText: "Spring sale plan" })).toHaveCount(0);
+  await expect(look.locator(".hcard", { hasText: "Rename the cart module" })).toHaveCount(0);
+});
+
+test("F-7.9 R-L20 a series opens as a table of all its runs, grouped by day, each named by its folder", async ({ page }) => {
+  await open(page, "Claude ×15: Give this meeting");
+  await expect(page.locator("#main .viewbar button.on")).toHaveText("Table");
+  await expect(page.locator("table.batch tr.r")).toHaveCount(15);
+  await expect(page.locator("table.batch tr.dayrow")).toHaveCount(5);
+  await expect(page.locator("table.batch tr.r").first()).toContainText(/meeting-1/);
+  await expect(page.locator("#main header .small").first()).toContainText("A series of 15 headless");
+  await shot(page, "series");
 });
 
 test("F-12.1 R-S3 hostile Markdown runs no script, keeps no javascript: link, and reaches no other host", async ({ page }) => {

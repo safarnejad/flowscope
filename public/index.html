@@ -282,10 +282,21 @@ details.call.target > summary { background: color-mix(in srgb, var(--accent) 12%
 .bell { position: relative; width: 28px; height: 28px; border-radius: 7px; background: var(--code); } .bell.on { color: var(--accent); }
 .bell.on::after { content: ""; position: absolute; top: 5px; right: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--run); box-shadow: 0 0 0 2px var(--code); }
 .theme.tabs.filters button { display: inline-grid; place-items: center; min-width: 26px; height: 24px; } .theme .ico { width: 14px; height: 14px; }
+
+/* Marks beside a session's kind: it launched subagents, workflows. */
+.mark { display: inline-flex; color: var(--mute); } .mark .ico { width: 13px; height: 13px; }
+#filters button { padding: 3px 8px; }
+.card.convo { max-width: 760px; margin: 4px 0 8px; }
+.card.convo .lbl .ico, .hcard b .ico, .linkbtn .ico { display: inline-block; width: 14px; height: 14px; vertical-align: -2px; margin-inline-end: 6px; color: var(--mute); }
+.linkbtn { font: inherit; color: var(--accent); background: none; border: 0; padding: 0; cursor: pointer; }
+.linkbtn:hover { text-decoration: underline; }
+.small.from { margin-top: 4px; }
+.hgrid + .viewbar { margin-top: 14px; }
+table.batch tr.dayrow td { color: var(--mute); font-size: 12px; font-weight: 600; padding-top: 12px; border-bottom: 1px solid var(--line); }
 </style>
 </head>
 <body>
-<aside><div class="brandrow"><h1 class="brand" data-act="home" title="Home"><svg class="logo" viewBox="0 0 32 32" aria-hidden="true"><rect x="3" y="4" width="7" height="24" rx="2.5" fill="var(--accent)"/><rect x="12.5" y="4" width="7" height="11" rx="2.5" fill="var(--accent)"/><rect x="12.5" y="17" width="7" height="11" rx="2.5" fill="var(--accent)" opacity=".45"/><rect x="22" y="4" width="7" height="7" rx="2.5" fill="var(--run)"/></svg>Flowscope</h1><span><button class="bell" id="bell" data-act="notify"></button><span class="theme tabs filters" id="theme"></span></span></div><div class="small sub">Claude Code workflows and agents, Claude and Codex CLI runs</div><input id="search" type="search" placeholder="Search runs" data-input="search"><div class="tabs filters" id="filters"></div><div id="warn"></div><div id="runs"></div><div id="hits" class="hits"></div></aside>
+<aside><div class="brandrow"><h1 class="brand" data-act="home" title="Home"><svg class="logo" viewBox="0 0 32 32" aria-hidden="true"><rect x="3" y="4" width="7" height="24" rx="2.5" fill="var(--accent)"/><rect x="12.5" y="4" width="7" height="11" rx="2.5" fill="var(--accent)"/><rect x="12.5" y="17" width="7" height="11" rx="2.5" fill="var(--accent)" opacity=".45"/><rect x="22" y="4" width="7" height="7" rx="2.5" fill="var(--run)"/></svg>Flowscope</h1><span><button class="bell" id="bell" data-act="notify"></button><span class="theme tabs filters" id="theme"></span></span></div><div class="small sub">Claude Code sessions, agents and workflows; Claude and Codex CLI runs</div><input id="search" type="search" placeholder="Search runs" data-input="search"><div class="tabs filters" id="filters"></div><div id="warn"></div><div id="runs"></div><div id="hits" class="hits"></div></aside>
 <main id="main"><div class="empty">Choose a run</div></main>
 <div id="keys" popover class="keys"><dl>
   <dt><kbd>J</kbd><kbd>K</kbd></dt><dd>Next / previous agent</dd><dt><kbd>P</kbd></dt><dd>Task</dd><dt><kbd>R</kbd></dt><dd>Result</dd>

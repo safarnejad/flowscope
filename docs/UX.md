@@ -2,7 +2,7 @@
 
 ## Who it is for and what they ask
 
-A developer who has started work that runs without them: a workflow with dozens of agents, a script firing a hundred `claude -p` calls, background subagents. They glance at Flowscope between other work. The questions, in order of how often they are asked:
+A developer who has started work that runs without them: a workflow with dozens of agents, a script firing a hundred `claude -p` calls, background subagents, or an app of theirs calling `claude -p` for each item. They glance at Flowscope between other work, and come back to it for a conversation they had last week. The questions, in order of how often they are asked:
 
 1. Is anything still running, and is it moving?
 2. Did something go wrong: stuck, stopped, failed, out of quota?
@@ -28,7 +28,7 @@ The design puts the answer to each question one level deeper than the one before
 ┌──────────────┬───────────────────────────────────────────┐
 │ Flowscope 🔔 ◐│ Run name  [running]                       │
 │ [search    ] │ description                               │
-│ All Wf Ag CLI│ done/started · running · elapsed · tokens │
+│All Ses Ag Wf │ done/started · running · elapsed · tokens │
 │ ⚠ format     │ ▓▓▓▓▓░░░ phase strip / progress bar       │
 │ RUNNING      │ [Board|Timeline]  [Copy resume command]   │
 │  run …       │ (2 agents silent over 10m) (1 stopped)    │
@@ -40,16 +40,24 @@ The design puts the answer to each question one level deeper than the one before
                               drawer slides in from the right ▶
 ```
 
-- **Sidebar (300 px).** Brand (click = home), notifications bell, theme switch, search, kind filter, format warning, run list, transcript hits. Each row: name, status (pulsing badge when running, else ✓ ✕ ■), "N of M going", kind, time, project folder kept to its end.
+- **Sidebar (300 px).** Brand (click = home), notifications bell, theme switch, search, kind filter (**All · Sessions · Agents · Workflows · CLI**; Agents are the sessions that launched subagents), format warning, run list, transcript hits. Each row: name, status (pulsing badge when running, else ✓ ✕ ■), "N of M going", kind, marks, time, project folder kept to its end.
+- **Marks.** A session that launched subagents carries a small fan-out icon, one that launched workflows the phase-columns icon (the workflow board's shape), each with a tooltip ("Launched 4 subagents"). They show in every filter, so a session that did more than talk is recognisable in All without filtering. Line icons, like the rest.
 - **Main.** Home, or one run.
 - **Drawer.** Up to 880 px, over the main area: title, state, resume / previous / next / keys / close, one meta line, tabs Task · Result · Transcript.
+
+## Session view
+
+- **Conversation first.** The header and stats (subagent counts only when it has subagents), then a wide **Conversation** card: running badge, model, tokens, peak context, started, last, and its latest action or tool wait. Clicking it opens the conversation in the drawer, as an agent's transcript.
+- **Then what it launched:** **Workflows it launched**, as tiles that open each workflow (whose page says "Launched from" this session), and **Subagents**, the usual board or timeline.
+- **A session that launched nothing** opens straight into its conversation in the drawer; Esc shows the page.
+- **Quiet.** A conversation is quiet whenever its person is thinking, so a session is flagged quiet only while a subagent of it runs, and a session at rest is not under **Needs a look** unless a subagent of it was cut off (R-T21, R-T25).
 
 ## Run view
 
 - **Stats row**: done of started, running now, longest tool wait (only when someone waits), elapsed, tokens (hover for the split), cache reads, share of the week, last activity.
 - **Progress**: workflows with phases get one segment per phase (done, active with moving stripes, stopped, pending) and "Phase k of n · active phase"; other runs get a plain bar.
 - **Board**: one column per phase (or Running / Done / Stopped). Columns are 200–360 px wide, so one phase does not stretch into a banner. Cards: two-line label, kind, state badge (not for done), flags (usage limit, API error, attempt n), tools, tokens, peak context, and either "ago" (running) or the duration; a running card adds its current action or "⏳ waiting on Tool for N"; a finished card has a thin bottom bar for its duration against the slowest agent.
-- **Table** (over R-L20 agents): number with a state colour, label with the shared prefix removed and named once in the header, tokens, took, start of result. Shape filters (All, Answers, Empty or one word, Running, Stopped) with counts, a search box, rows shown per R-L21 then "Show more".
+- **Table** (over R-L20 agents, and every series): runs on more than one day are grouped under a row per day; number with a state colour, label with the shared prefix removed and named once in the header, tokens, took, start of result. Shape filters (All, Answers, Empty or one word, Running, Stopped) with counts, a search box, rows shown per R-L21 then "Show more".
 - **Timeline**: lanes grouped by phase on a shared axis; long idle stretches cut and drawn as hatched bands with their length, so agents hours apart are still readable; labels that would overlap are dropped.
 - **Folded panels**: Log (open), Final result, Script.
 

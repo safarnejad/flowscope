@@ -15,7 +15,8 @@ Under the Claude root, `<project>` is the working directory with every non-alpha
 
 - **JSONL** files are read in chunks (R-L2) and split on newlines. A line that fails to parse is skipped, and an over-long line is skipped unread (R-L1). Symbolic links under the roots are not followed (R-S8). When only some lines matter, the raw bytes are first searched for a needle (`"usage"`, `"ai-title"`, `"cwd"`), and only lines containing it are decoded and parsed.
 - **JSON** files are read whole; a parse failure counts as "absent".
-- **Header probes** read only the head of a file (`headHas`, R-L2), to classify a session without reading all of it.
+- **Header probes** read only the head of a file (`sessionHead`, R-L2), to classify a session and name it without reading all of it; a session's card reads only its tail (R-L14).
+- **Followed** files (a session's title, any file's usage, an open transcript) are read on from where the last read stopped when they grow (R-C4).
 - Every derived result is cached by the file's `mtime:size` (see [ARCHITECTURE.md](ARCHITECTURE.md#caching)).
 
 ## Claude Code: workflow runs
@@ -30,7 +31,20 @@ Directory: `<root>/<project>/<session>/`
 | `subagents/workflows/<runId>/agent-<id>.jsonl` | `describe`, `fileUsage`, transcript, search | see *Transcripts* | card details, tokens, transcript |
 | `workflows/<runId>.json` (final record, written at the end) | `summary`, `detail` | `status`, `workflowName`, `summary`, `startTime`, `durationMs`, `phases[]` (`title`, `detail`), `workflowProgress[]` (entries with `type: "workflow_agent"`: `agentId`, `startedAt`, `model`, `attempt`, `state`), `logs[]`, `result`, `script` | run status, name, description, duration, phase columns, per-agent model/attempt, log, final result, script fallback |
 | `workflows/scripts/<name>-<runId>.js` | `scriptFor` | file text; regex for `name:`, `description:`, `phases: [{ title, detail }]` | the Script panel; name, description and phases while the run has no final record |
-| `../<session>.jsonl` (the session itself) | `sessionTitle`, `sessionCwd` | lines with `"ai-title"` → `aiTitle` (last wins); first line with `"cwd"` → `cwd` | the `agents` run's name; the folder for the resume command |
+| `../<session>.jsonl` (the session itself) | see *Sessions* | | the session the workflow is linked from; the folder for the resume command |
+
+## Claude Code: sessions
+
+File: `<root>/<project>/<session>.jsonl`. Every such file whose head lacks the marker in R-K4 is a session run (a headless one is a CLI run, below).
+
+| Read | Fields used | Becomes |
+|---|---|---|
+| head (R-L2) | the R-K4 marker; the first `cwd`; the first `timestamp`; the first `type: "user"` line that is not `isMeta` and whose `message.content` (string, or `text` blocks) does not start with `<` | headless or not; the folder (description, resume command); start; the name when there is no title (R-L11) |
+| lines with `"ai-title"` (followed, R-C4) | `type: "ai-title"`, `aiTitle` (last wins) | the name |
+| lines with `"usage"` (followed) | as *Transcripts* | the session's tokens, with its subagents' |
+| tail (R-L14) | as *Transcripts*: last assistant action, pending `tool_use`, `message.model`, `effort`, `message.usage`, `isApiErrorMessage` | the **Conversation** card |
+| the whole file, only when opened (followed) | as *Transcripts* | the conversation's transcript |
+| file time | mtime | with its subagents' and workflows' files: last activity and running/at rest (R-T1) |
 
 ## Claude Code: plain subagents
 
@@ -41,7 +55,7 @@ Directory: `<root>/<project>/<session>/subagents/`
 | `agent-<id>.meta.json` | `agentType` (agents with `workflow-subagent` are skipped here), `description`, `requestShape` (`background`), `finished` | label, type, background flag, `done` signal |
 | `agent-<id>.jsonl` | see *Transcripts*; plus `SubagentHandback` tool calls (`input.message`) | card details, the agent's report (its Result) |
 
-A session appears as an `agents` run only if at least one such meta file exists and at least one agent is not a workflow subagent.
+These belong to the session's run. A session folder with such agents is listed even when its `.jsonl` is missing or headless.
 
 ## Claude Code: headless CLI runs (`claude -p`)
 
@@ -49,7 +63,7 @@ File: `<root>/<project>/<session>.jsonl`, the same place as interactive sessions
 
 | Check / field | Use |
 |---|---|
-| The head contains the marker in R-K4 | it is headless (Agent SDK system prompt); otherwise skipped |
+| The head contains the marker in R-K4 | it is headless (Agent SDK system prompt); otherwise it is a session (above) |
 | first `type: "user"` line: `sessionId`, `cwd`, `timestamp`, `message.content` | run id (a safe name, R-S4, else the run is skipped), folder, start time, prompt (role, label, `head` for grouping, R-L7) |
 | every user line with text | turn count; newest prompt's heading for live sessions |
 | the rest | as *Transcripts*; result = final text when the run ended on text |
