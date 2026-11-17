@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
-// Flowscope: reads Claude Code's workflow runs from ~/.claude/projects and serves a live view of them on localhost.
+// Flowscope: reads Claude Code's sessions, subagents and workflow runs from ~/.claude/projects, and headless CLI runs of
+// Claude Code and Codex, and serves a live view of them on localhost.
 // It never changes Claude Code's files; the only thing it writes is its own cache, ~/.claude/flowscope/cache.db.
 import { readdirSync, readFileSync, statSync, lstatSync, existsSync, openSync, readSync, closeSync, mkdirSync, chmodSync } from "node:fs";
 import { Database } from "bun:sqlite";
@@ -18,7 +19,7 @@ const { values: args, positionals } = parseArgs({
   },
 });
 if (args.help) {
-  console.log(`flowscope: a live view of Claude Code workflow runs
+  console.log(`flowscope: a live view of Claude Code sessions, subagents and workflows, and of headless Claude Code and Codex CLI runs
 
   flowscope [start]  start in the background; does nothing if it is already running
   flowscope stop     stop the running server
@@ -28,7 +29,8 @@ if (args.help) {
   -o, --open       open the page in the browser
   -h, --help       show this help
 
-  Shows Claude Code workflow runs and plain subagents, and headless \`claude -p\` and \`codex exec\` runs.
+  Shows every Claude Code session with the subagents and workflows it launched, and headless \`claude -p\`
+  and \`codex exec\` runs, in batches and in series.
 
   Environment:
     FLOWSCOPE_PORT       port, when -p is not given (default 4747)
@@ -92,7 +94,7 @@ const LIVE_MS = 15 * 60_000; // R-T1
 // on disk with the file's size and time, so a restart reads only files that are new or changed since. Answers of
 // finished CLI runs, the bulk of it, stay here and are read when that run is opened. Bump VERSION when a stored
 // shape changes, and the old entries are simply not found.
-const VERSION = 1; // R-C2
+const VERSION = 2; // R-C2
 const DB = join(CACHE_DIR, "cache.db");
 const db = new Database(DB);
 db.run("PRAGMA journal_mode = WAL"); db.run("PRAGMA synchronous = OFF");
@@ -126,46 +128,108 @@ const mtime = (f: string) => (existsSync(f) ? statSync(f).mtimeMs : 0);
 const CHUNK = Buffer.allocUnsafe(8 << 20);
 // A single line longer than this is skipped up to its end, so one huge line cannot grow memory without bound (R-L1).
 const MAX_LINE = 64 << 20;
-function lines(f: string, needle?: string): string[] {
+// Calls `each` with every line of a file from byte `from` on (or, given a needle, only the lines that contain it) and
+// returns the offset just past the last complete line, so an append-only file can be read on from there next time.
+// `partial` also takes a last line with no newline yet (a whole read); a follower leaves it for the next read.
+function eachLine(f: string, each: (l: string) => void, o: { needle?: string; from?: number; partial?: boolean } = {}): number {
   // Every 128MB read, before the next file: by then the last ones' parsed records are garbage, and collected before
   // they pile up. Memory Bun has once used it keeps, so the peak is what stays.
   if (readSinceGc > 128 << 20) { readSinceGc = 0; Bun.gc(true); }
+  const from = o.from ?? 0;
   let fd: number;
-  try { fd = openSync(f, "r"); } catch { return []; }
-  const out: string[] = [], n = needle ? Buffer.from(needle) : null;
-  let carry: Buffer | null = null, skipping = false;
+  try { fd = openSync(f, "r"); } catch { return from; }
+  const n = o.needle ? Buffer.from(o.needle) : null;
+  let pos = from, end = from, carry: Buffer | null = null, skipping = false, read = 0;
+  const emit = (data: Buffer, s: number, e: number) => { if (e > s) { read += e - s; each(data.toString("utf8", s, e)); } };
   try {
     for (;;) {
-      const got = readSync(fd, CHUNK, 0, CHUNK.length, null);
+      const got = readSync(fd, CHUNK, 0, CHUNK.length, pos);
+      // `base` is the file offset of data[0].
+      let base = pos - (carry?.length ?? 0);
+      pos += got;
       let data: Buffer = carry ? Buffer.concat([carry, CHUNK.subarray(0, got)]) : CHUNK.subarray(0, got);
+      carry = null;
       if (skipping) {
         const nl = data.indexOf(10);
         if (nl < 0) { if (!got) break; continue; }
-        data = data.subarray(nl + 1); skipping = false;
+        data = data.subarray(nl + 1); base += nl + 1; end = base; skipping = false;
       }
       // Complete lines only; the rest waits for the next piece, or ends the file.
-      const end = got ? data.lastIndexOf(10) + 1 : data.length;
-      if (!n) for (let s = 0; s < end; ) { const e0 = data.indexOf(10, s), e = e0 < 0 || e0 >= end ? end : e0; if (e > s) out.push(data.toString("utf8", s, e)); s = e + 1; }
-      else for (let i = data.indexOf(n); i >= 0 && i < end; ) {
-        const s = data.lastIndexOf(10, i) + 1, e0 = data.indexOf(10, i), e = e0 < 0 || e0 >= end ? end : e0;
-        out.push(data.toString("utf8", s, e));
+      const cut = data.lastIndexOf(10) + 1;
+      const stop = !got && o.partial ? data.length : cut;
+      if (!n) for (let s = 0; s < stop; ) { const e0 = data.indexOf(10, s), e = e0 < 0 || e0 >= stop ? stop : e0; emit(data, s, e); s = e + 1; }
+      else for (let i = data.indexOf(n); i >= 0 && i < stop; ) {
+        const s = data.lastIndexOf(10, i) + 1, e0 = data.indexOf(10, i), e = e0 < 0 || e0 >= stop ? stop : e0;
+        emit(data, s, e);
         i = data.indexOf(n, e);
       }
-      carry = end < data.length ? Buffer.from(data.subarray(end)) : null;
+      end = base + stop;
       if (!got) break;
-      // An over-long line is dropped: what follows is skipped up to the next newline.
+      carry = cut < data.length ? Buffer.from(data.subarray(cut)) : null;
+      // An over-long line is dropped: what follows is skipped up to the next newline (R-L1).
       if (carry && carry.length > MAX_LINE) { carry = null; skipping = true; }
     }
   } finally { closeSync(fd); }
-  readSinceGc += out.reduce((n, l) => n + l.length, 0);
+  readSinceGc += read;
+  return end;
+}
+function lines(f: string, needle?: string): string[] {
+  const out: string[] = [];
+  eachLine(f, (l) => out.push(l), { needle, partial: true });
   return out;
 }
 let readSinceGc = 0;
-// Whether a file's first bytes contain a marker, without reading the rest.
+// A session file's first bytes, read once: whether it is a headless run (R-K4), and what the list shows of a
+// session without reading the rest of it (its folder, its first prompt, its start). Once the file is longer than the
+// head, the head no longer changes, so it is kept by path alone (R-L2).
 const HEAD = Buffer.allocUnsafe(512 << 10);
-function headHas(f: string, marker: string) {
-  const fd = openSync(f, "r");
-  try { return HEAD.subarray(0, readSync(fd, HEAD, 0, HEAD.length, 0)).indexOf(marker) >= 0; } finally { closeSync(fd); }
+type Head = { headless: boolean; cwd: string; prompt: string; startedAt: number | null };
+function sessionHead(f: string): Head {
+  let size = 0;
+  try { size = statSync(f).size; } catch { return { headless: false, cwd: "", prompt: "", startedAt: null }; }
+  return stored("head", f, size >= HEAD.length ? "full" : fileKey(f), () => {
+    const fd = openSync(f, "r");
+    let head: Buffer;
+    try { head = HEAD.subarray(0, readSync(fd, HEAD, 0, HEAD.length, 0)); } finally { closeSync(fd); }
+    const h: Head = { headless: head.indexOf(HEADLESS) >= 0, cwd: "", prompt: "", startedAt: null };
+    const cut = head.length < HEAD.length ? head.length : head.lastIndexOf(10) + 1;
+    for (const l of head.toString("utf8", 0, cut).split("\n")) {
+      let x: any; try { x = JSON.parse(l); } catch { continue; }
+      if (!h.cwd && typeof x.cwd === "string") h.cwd = x.cwd;
+      if (h.startedAt == null && typeof x.timestamp === "string") h.startedAt = Date.parse(x.timestamp) || null;
+      // The first thing the person typed: not a tool result, a command's echo (<command-name>…) or a system note.
+      if (!h.prompt && x.type === "user" && !x.isMeta) {
+        const t = textOf(x.message?.content).trim();
+        if (t && !t.startsWith("<")) h.prompt = t.slice(0, 2000);
+      }
+      if (h.cwd && h.prompt && h.startedAt != null) break;
+    }
+    return h;
+  });
+}
+// What has been read of an append-only file (a session, a transcript), kept with the offset it got to and a hash of
+// the file's first bytes: a file that grew is read on from that offset, not again from the start (R-C4).
+const SIG = Buffer.allocUnsafe(256);
+const sigOf = (f: string) => { try { const fd = openSync(f, "r"); try { return Bun.hash(SIG.subarray(0, readSync(fd, SIG, 0, SIG.length, 0))).toString(36); } finally { closeSync(fd); } } catch { return ""; } };
+type Followed<S> = { sig: string; end: number; s: S };
+const followed = new Map<string, { key: string; st: Followed<any> }>();
+function follow<S>(kind: string, f: string, init: () => S, needle: string | undefined, step: (s: S, line: string) => void,
+  o: { persist?: boolean; cache?: Map<string, { key: string; st: Followed<any> }> } = {}): S {
+  const cache = o.cache ?? followed, persist = o.persist ?? true, id = `${kind}\0${f}`, key = fileKey(f);
+  const hit = cache.get(id);
+  if (hit?.key === key) { cache.delete(id); cache.set(id, hit); return hit.st.s; }
+  let prev: Followed<S> | null = hit?.st ?? null;
+  if (!prev && persist) {
+    const d = getQ.get(`${kind}@${VERSION}`, f) as { key: string; value: string } | null;
+    try { prev = d ? JSON.parse(d.value) : null; } catch {}
+    if (prev && d!.key === key) { cache.set(id, { key, st: prev }); return prev.s; }
+  }
+  const size = key === "none" ? 0 : Number(key.split(":")[1]), sig = sigOf(f);
+  const st: Followed<S> = prev && prev.sig === sig && prev.end <= size ? prev : { sig, end: 0, s: init() };
+  st.end = eachLine(f, (l) => step(st.s, l), { needle, from: st.end });
+  cache.delete(id); cache.set(id, { key, st });
+  if (persist) putQ.run(`${kind}@${VERSION}`, f, key, JSON.stringify(st));
+  return st.s;
 }
 const jsonl = (f: string) => lines(f).flatMap((l) => { try { return [JSON.parse(l)]; } catch { return []; } });
 const json = (f: string) => {
@@ -178,12 +242,17 @@ const formatIssues = new Map<string, { what: string; file: string; at: number }>
 const odd = (what: string, file: string) => { if (!formatIssues.has(what)) formatIssues.set(what, { what, file, at: Date.now() }); };
 
 type Loc = { project: string; session: string; runId: string };
-// A session's plain subagents (the Agent tool, outside any workflow) are shown as one pseudo-run with this id.
-const AGENTS = "agents";
-const runDir = (l: Loc) => l.runId === AGENTS
+// A Claude Code session is one run with this id: its own conversation, and the plain subagents it launched (the Agent
+// tool, outside any workflow). Links from 0.1, when a session's subagents were a run of their own, used "agents".
+const SESSION = "session", AGENTS = "agents";
+// The conversation itself, in a session's detail and in links, as if it were one of its agents.
+const MAIN = "main";
+const runDir = (l: Loc) => l.runId === SESSION || l.runId === AGENTS
   ? join(ROOT, l.project, l.session, "subagents")
   : join(ROOT, l.project, l.session, "subagents", "workflows", l.runId);
 const finalFile = (l: Loc) => join(ROOT, l.project, l.session, "workflows", `${l.runId}.json`);
+const sessionFile = (l: Loc) => join(ROOT, l.project, `${l.session}.jsonl`);
+const workflowIds = (l: Loc) => ls(join(ROOT, l.project, l.session, "subagents", "workflows")).filter((n) => n.startsWith("wf_") && SAFE.test(n));
 
 function scriptFor(l: Loc): string {
   const dir = join(ROOT, l.project, l.session, "workflows", "scripts");
@@ -204,15 +273,23 @@ function metaFromScript(src: string) {
 function listRuns() {
   const runs = [];
   for (const project of ls(ROOT).filter((n) => SAFE.test(n))) {
-    for (const session of ls(join(ROOT, project)).filter((n) => SAFE.test(n))) {
-      const base = join(ROOT, project, session, "subagents", "workflows");
-      for (const runId of ls(base)) {
-        if (!runId.startsWith("wf_") || !SAFE.test(runId)) continue;
-        runs.push(cachedSummary({ project, session, runId }));
+    const entries = ls(join(ROOT, project));
+    const sessions = new Set<string>();
+    for (const e of entries) {
+      if (e.endsWith(".jsonl")) {
+        // Every Claude Code session is a run; a headless one (`claude -p`) is a CLI run instead (R-K4).
+        const session = e.slice(0, -6), f = join(ROOT, project, e);
+        if (!SAFE.test(session)) continue;
+        try { if (!statSync(f).isFile() || sessionHead(f).headless) continue; } catch { continue; }
+        sessions.add(session);
+        continue;
       }
-      const l = { project, session, runId: AGENTS };
-      if (ls(runDir(l)).some((f) => f.endsWith(".meta.json"))) { const s = cachedSummary(l); if (s.agents) runs.push(s); }
+      if (!SAFE.test(e)) continue;
+      for (const runId of workflowIds({ project, session: e, runId: "" })) runs.push(cachedSummary({ project, session: e, runId }));
+      // A session folder with plain subagents is listed even when its file is gone or headless.
+      if (ls(join(ROOT, project, e, "subagents")).some((f) => f.endsWith(".meta.json"))) sessions.add(e);
     }
+    for (const session of sessions) { const s = cachedSummary({ project, session, runId: SESSION }); if (s.name) runs.push(s); }
   }
   for (const b of cliBatches()) runs.push(cliSummary(b));
   return runs.sort((a, b) => b.lastActivity - a.lastActivity);
@@ -223,14 +300,17 @@ function listRuns() {
 const summaryCache = new Map<string, { key: string; value: any }>();
 function cachedSummary(l: Loc) {
   const dir = runDir(l);
-  const files = [...ls(dir).map((f) => join(dir, f)), finalFile(l), join(ROOT, l.project, `${l.session}.jsonl`)];
+  // Files only: a folder's time moves when something is added to it, not when its files are written.
+  const files = [...ls(dir).filter((f) => f !== "workflows").map((f) => join(dir, f)), finalFile(l), sessionFile(l)];
+  // A session is dated by its newest file: the conversation, its subagents, or its workflows' files.
+  if (l.runId === SESSION) for (const wf of workflowIds(l)) { const d = join(dir, "workflows", wf); files.push(...ls(d).map((f) => join(d, f))); }
   const stamps = files.map(mtime);
   // A run with no final record turns from running to stopped by time alone, and an agent's report counts after 5 quiet seconds.
   const idle = Date.now() - Math.max(...stamps);
   const key = `${stamps.join(",")}|${idle < 10_000}|${idle < LIVE_MS}`;
   const k = `${l.session}/${l.runId}`;
   const hit = summaryCache.get(k);
-  const value = hit?.key === key ? hit.value : (l.runId === AGENTS ? agentsSummary(l) : summary(l));
+  const value = hit?.key === key ? hit.value : (l.runId === SESSION ? sessionSummary(l, Math.max(...stamps)) : summary(l));
   if (hit?.key !== key) summaryCache.set(k, { key, value });
   // The week's total moves on its own, so the share is worked out fresh.
   const week = weekUsage();
@@ -239,28 +319,21 @@ function cachedSummary(l: Loc) {
 
 const shortProject = (p: string) => p.replace(/^-(Users|home)-[^-]+-/, "").replace(/-/g, "/");
 
-// The session's latest AI-written title, cached until the session file changes.
-const titleCache = new Map<string, { key: number; title: string }>();
+// The session's latest AI-written title. Only lines holding "ai-title" are decoded, and a session that grew is read
+// on from where the last read stopped (R-C4).
 function sessionTitle(project: string, session: string) {
-  const f = join(ROOT, project, `${session}.jsonl`);
-  const key = mtime(f);
-  const hit = titleCache.get(f);
-  if (hit?.key === key) return hit.title;
-  let title = "";
-  if (key) for (const l of lines(f, '"ai-title"')) {
-    try { title = JSON.parse(l).aiTitle ?? title; } catch {}
-  }
-  titleCache.set(f, { key, title });
-  return title;
+  return follow("title", join(ROOT, project, `${session}.jsonl`), () => ({ title: "" }), '"ai-title"', (s, l) => {
+    try { const x = JSON.parse(l); if (x.type === "ai-title" && typeof x.aiTitle === "string" && x.aiTitle.trim()) s.title = own(x.aiTitle.trim()); } catch {}
+  }).title;
 }
 
-// The folder a session ran in, which a resume command has to start from.
+// The folder a session ran in, which a resume command has to start from: from the head, else the first line naming one.
 const cwdCache = new Map<string, string>();
 function sessionCwd(project: string, session: string) {
   const f = join(ROOT, project, `${session}.jsonl`);
   if (cwdCache.has(f)) return cwdCache.get(f)!;
-  let cwd = "";
-  for (const l of lines(f, '"cwd"')) { try { cwd = JSON.parse(l).cwd ?? ""; } catch {} if (cwd) break; }
+  let cwd = existsSync(f) ? sessionHead(f).cwd : "";
+  if (!cwd) for (const l of lines(f, '"cwd"')) { try { cwd = JSON.parse(l).cwd ?? ""; } catch {} if (cwd) break; }
   cwdCache.set(f, cwd);
   return cwd;
 }
@@ -317,36 +390,58 @@ function agentState(meta: any, t: string) {
   return idle < LIVE_MS ? "running" : "stopped";
 }
 
-function agentsSummary(l: Loc) {
-  const dir = runDir(l);
+// A session's name: its latest AI-written title, else the first line of its first prompt (R-L11). A session with
+// neither, and no subagents, was opened and left; it is not listed.
+const cutLine = (t: string) => (t.split("\n").map((x) => x.trim()).find(Boolean) ?? "").replace(/^(.{68}).{3,}$/s, (_, h) => h.replace(/\s+\S*$/, "") + "…");
+function sessionSummary(l: Loc, lastActivity: number) {
+  const dir = runDir(l), f = sessionFile(l);
+  // A headless session's own file is a CLI run's; here only its subagents count.
+  const head = existsSync(f) && !sessionHead(f).headless ? sessionHead(f) : null;
   const list = plainAgents(l).map(({ agentId, meta }) => {
     const t = join(dir, `agent-${agentId}.jsonl`);
-    return { state: agentState(meta, t), lastActivity: mtime(t), usage: fileUsage(t).total };
+    return { state: agentState(meta, t), usage: fileUsage(t).total };
   });
-  const usage = list.reduce((u, a) => add(u, a.usage), zero());
+  const usage = list.reduce((u, a) => add(u, a.usage), head ? add(zero(), fileUsage(f).total) : zero());
   const week = weekUsage();
-  const running = list.filter((a) => a.state === "running").length;
+  const workflows = workflowIds(l).length;
+  const name = sessionTitle(l.project, l.session) || cutLine(head?.prompt ?? "") || (list.length ? `Session ${l.session.slice(0, 8)}` : "");
+  const live = Date.now() - lastActivity < LIVE_MS;
   return {
     ...l,
-    kind: "agents",
+    kind: SESSION,
     project: shortProject(l.project),
     projectKey: l.project,
-    name: sessionTitle(l.project, l.session) || `Session ${l.session.slice(0, 8)}`,
-    description: `Subagents launched in this session (${l.session})`,
-    status: running ? "running" : list.some((a) => a.state === "stopped") ? "stopped" : "completed",
-    startTime: null,
+    name,
+    description: `Claude Code session ${l.session}${head?.cwd ? ` in ${head.cwd}` : ""}`,
+    // A conversation has no end marker: it is running while anything in it was written within the live window (R-T1),
+    // then at rest, which counts as stopped only when one of its subagents was left unfinished.
+    status: live ? "running" : list.some((a) => a.state === "stopped") ? "stopped" : "completed",
+    startTime: head?.startedAt ?? null,
     durationMs: null,
     usage,
     weekShare: week.weighted ? usage.weighted / week.weighted : 0,
     agents: list.length,
     agentsDone: list.filter((a) => a.state === "done").length,
-    lastActivity: Math.max(...list.map((a) => a.lastActivity)),
+    agentsRunning: list.filter((a) => a.state === "running").length,
+    workflows,
+    lastActivity,
   };
 }
 
-function agentsDetail(l: Loc) {
-  const dir = runDir(l);
-  const s = agentsSummary(l);
+// The tail a session's card is read from: its current action, a pending tool call, its model. A session runs to
+// hundreds of megabytes, and only its end says what it is doing now (R-L2).
+const TAIL = 1 << 20;
+function tailLines(f: string) {
+  let size = 0; try { size = statSync(f).size; } catch { return []; }
+  const from = Math.max(0, size - TAIL), out: any[] = [];
+  let first = from > 0;
+  eachLine(f, (l) => { if (first) { first = false; return; } try { out.push(JSON.parse(l)); } catch {} }, { from, partial: true });
+  return out;
+}
+
+function sessionDetail(l: Loc) {
+  const dir = runDir(l), f = sessionFile(l);
+  const s = cachedSummary({ ...l, runId: SESSION });
   const agents = plainAgents(l).map(({ agentId, meta }) => {
     const t = join(dir, `agent-${agentId}.jsonl`);
     const a: any = { agentId, label: meta.description, type: meta.agentType, background: meta.requestShape === "background" };
@@ -357,18 +452,45 @@ function agentsDetail(l: Loc) {
     if (a.state === "done") a.result = ending(t).report ?? "";
     return a;
   });
+  const resume = resumeCmd("claude", sessionCwd(l.project, l.session), l.session);
+  // The conversation, drawn like an agent: from the head and the tail of its file, never the whole of it.
+  let main = null;
+  if (existsSync(f)) {
+    const head = sessionHead(f), m: any = { agentId: MAIN, label: s.name, type: "conversation", resume,
+      state: Date.now() - mtime(f) < LIVE_MS ? "running" : "done", startedAt: head.startedAt ?? mtime(f) };
+    const lines = tailLines(f);
+    describeLines(m, lines, f);
+    m.result = latestReply(lines);
+    m.tools = null;
+    main = m;
+  }
+  const workflows = workflowIds(l).map((runId) => { const w = cachedSummary({ ...l, runId });
+    return { session: l.session, runId, name: w.name, status: w.status, agents: w.agents, agentsDone: w.agentsDone, lastActivity: w.lastActivity }; });
   return {
-    ...s,
-    resume: resumeCmd("claude", sessionCwd(l.project, l.session), l.session),
+    ...s, resume, main, workflows,
     phases: [{ title: "Running" }, { title: "Done" }, { title: "Stopped", detail: "unfinished, no activity in 15 minutes" }],
     logs: [], result: null, script: "",
     agents: agents.sort((a, b) => b.startedAt - a.startedAt),
   };
 }
 
+// A conversation's latest reply: Claude's text since the person's last prompt, from the file's tail (R-L14); "" while
+// Claude has not answered it yet. A conversation never hands back a report, so this is what its Result shows.
+function latestReply(lines: any[]) {
+  let reply = "";
+  for (const x of lines) {
+    const content = x.message?.content;
+    if (x.type === "user" && !(Array.isArray(content) && content.some((c: any) => c.type === "tool_result"))) reply = "";
+    if (x.type !== "assistant" || !Array.isArray(content) || x.isApiErrorMessage) continue;
+    const text = content.filter((c: any) => c.type === "text" && c.text.trim()).map((c: any) => c.text).join("\n\n");
+    if (text) reply = text;
+  }
+  return reply;
+}
+
 // Fills in what the transcript tells about an agent: start, activity, model, tokens, tool calls, current action. Returns its lines.
-function describe(a: any, t: string) {
-  const lines = jsonl(t);
+function describe(a: any, t: string) { return describeLines(a, jsonl(t), t); }
+function describeLines(a: any, lines: any[], t: string) {
   a.startedAt ??= lines[0]?.timestamp ? Date.parse(lines[0].timestamp) : mtime(t);
   a.lastActivity = mtime(t);
   a.model ??= lines.find((x) => x.type === "assistant")?.message?.model;
@@ -467,33 +589,24 @@ function detail(l: Loc) {
 type Usage = { input: number; cacheWrite: number; cacheRead: number; output: number; weighted: number };
 const zero = (): Usage => ({ input: 0, cacheWrite: 0, cacheRead: 0, output: 0, weighted: 0 });
 const add = (a: Usage, b: Usage) => { for (const k of Object.keys(a) as (keyof Usage)[]) a[k] += b[k]; return a; };
-const usageCache = new Map<string, { key: string; total: Usage; daily: Map<string, Usage> }>();
+const sub = (a: Usage, b: Usage) => { for (const k of Object.keys(a) as (keyof Usage)[]) a[k] -= b[k]; return a; };
 
+// Followed as the file grows (R-C4). The last few message ids are kept, so a message logged again after a read
+// replaces its count instead of adding to it (R-K2).
+type UsageState = { total: Usage; daily: Record<string, Usage>; recent: [string, string, Usage][] };
 function fileUsage(f: string) {
-  const st = existsSync(f) ? statSync(f) : null;
-  const key = `${st?.mtimeMs}:${st?.size}`;
-  const hit = usageCache.get(f);
-  if (hit?.key === key) return hit;
-  const saved = stored("usage", f, key, () => { const u = readUsage(f, !!st); return { total: u.total, daily: [...u.daily] }; });
-  const r = { key, total: saved.total, daily: new Map(saved.daily) };
-  usageCache.set(f, r);
-  return r;
-}
-function readUsage(f: string, exists: boolean) {
-  const byId = new Map<string, { u: any; ts: string }>();
-  if (exists) for (const l of lines(f, '"usage"')) {
-    if (!l.includes('"assistant"')) continue;
-    try { const x = JSON.parse(l); if (x.type === "assistant" && x.message?.usage) byId.set(x.message.id ?? x.uuid, { u: x.message.usage, ts: x.timestamp }); } catch {}
-  }
-  const total = zero(), daily = new Map<string, Usage>();
-  for (const { u, ts } of byId.values()) {
+  return follow<UsageState>("usage", f, () => ({ total: zero(), daily: {}, recent: [] }), '"usage"', (s, l) => {
+    if (!l.includes('"assistant"')) return;
+    let x: any; try { x = JSON.parse(l); } catch { return; }
+    if (x.type !== "assistant" || !x.message?.usage) return;
+    const u = x.message.usage, id = String(x.message.id ?? x.uuid), h = String(x.timestamp ?? "").slice(0, 13); // hour bucket, for the rolling week
     const v = { input: u.input_tokens ?? 0, cacheWrite: u.cache_creation_input_tokens ?? 0, cacheRead: u.cache_read_input_tokens ?? 0, output: u.output_tokens ?? 0, weighted: 0 };
     v.weighted = v.input + v.cacheWrite * 1.25 + v.cacheRead * 0.1 + v.output * 5;
-    add(total, v);
-    const h = String(ts ?? "").slice(0, 13); // hour bucket, for the rolling week
-    add(daily.get(h) ?? daily.set(h, zero()).get(h)!, v);
-  }
-  return { total, daily };
+    const i = s.recent.findIndex((r) => r[0] === id);
+    if (i >= 0) { const [, ph, pv] = s.recent[i]; sub(s.total, pv); sub(s.daily[ph] ?? zero(), pv); s.recent.splice(i, 1); }
+    add(s.total, v); add(s.daily[h] ??= zero(), v);
+    s.recent.push([id, h, v]); if (s.recent.length > 32) s.recent.shift();
+  });
 }
 
 const walk = (d: string): string[] => ls(d).flatMap((n) => {
@@ -508,7 +621,7 @@ function weekUsage() {
   const total = zero();
   for (const f of walk(ROOT)) {
     if (mtime(f) < since) continue;
-    for (const [h, u] of fileUsage(f).daily) if (Date.parse(h + ":00:00Z") >= since - 3600_000) add(total, u);
+    for (const [h, u] of Object.entries(fileUsage(f).daily)) if (Date.parse(h + ":00:00Z") >= since - 3600_000) add(total, u);
   }
   weekCache = { at: Date.now(), value: total };
   return total;
@@ -557,7 +670,7 @@ const textOf = (c: any): string => typeof c === "string" ? c : Array.isArray(c) 
 
 function parseClaude(f: string): CliRun | null {
   // The SDK's system prompt is in the session's first records; interactive sessions, the big files, stop here.
-  if (!headHas(f, HEADLESS)) return null;
+  if (!sessionHead(f).headless) return null;
   const lines = jsonl(f);
   const first = lines.find((x) => x.type === "user");
   // The id ends up in the page's links and attributes, so a run whose id is not a safe name is left out (R-S4).
@@ -620,7 +733,13 @@ const runRole = (prompt: string) => (prompt.split("\n").map((s) => s.trim()).fin
 // The batch's own line from a run's prompt: its last heading (`# …` or `=== … ===`), which is usually what varies.
 const runLabel = (prompt: string) => prompt.split("\n").map((s) => s.trim().match(/^(?:#{1,6}\s+|={3,}\s*)(.+?)\s*=*$/)?.[1]).filter(Boolean).at(-1);
 
-let batchCache = { at: 0, value: [] as { id: string; runs: CliRun[] }[] };
+// A batch is the unit for runs started together. A series is the unit for runs one program fires again and again,
+// one at a time, often each from its own folder (one title per meeting, say): runs of one tool, in one repository as a
+// batch's (R-L9), whose prompts open the same way (R-L13). A series spread over more than one batch is one run of its own.
+type Batch = { id: string; runs: CliRun[]; series: boolean };
+const folderKey = (cwd: string) => cwd.split("/").slice(0, 6).join("/"); // R-L9
+const opening = (r: CliRun) => r.role.toLowerCase().split(/\s+/).filter(Boolean).slice(0, 5).join(" ");
+let batchCache = { at: 0, value: [] as Batch[] };
 function cliBatches() {
   if (Date.now() - batchCache.at < 1_000) return batchCache.value;
   const all: CliRun[] = [];
@@ -628,14 +747,15 @@ function cliBatches() {
   const take = (f: string, parse: (f: string) => CliRun | null) => { try { const r = cached(f, parse); if (r && SAFE.test(r.id ?? "")) all.push(r); } catch {} };
   for (const project of ls(ROOT).filter((n) => SAFE.test(n))) for (const f of ls(join(ROOT, project))) if (f.endsWith(".jsonl")) take(join(ROOT, project, f), parseClaude);
   for (const f of walk(CODEX)) take(f, parseCodex);
+  all.sort((a, b) => a.startedAt - b.startedAt);
   // One batch: runs of one tool in one repository, each started soon after the one before. Parallel reviewers with
   // different prompts land together; a long series with the same prompt opening may space out more.
   const groups = new Map<string, CliRun[]>();
-  for (const r of all.sort((a, b) => a.startedAt - b.startedAt)) {
-    const k = `${r.tool}\0${r.cwd.split("/").slice(0, 6).join("/")}`;
+  for (const r of all) {
+    const k = `${r.tool}\0${folderKey(r.cwd)}`;
     groups.set(k, [...(groups.get(k) ?? []), r]);
   }
-  const batches = [];
+  const batches: CliRun[][] = [];
   for (const rs of groups.values()) {
     let cur: CliRun[] = [];
     for (const r of rs) {
@@ -646,25 +766,42 @@ function cliBatches() {
     }
     batches.push(cur);
   }
-  batchCache = { at: Date.now(), value: batches.map((runs) => ({ id: `${runs[0].tool}-${runs[0].id}`, runs })) };
+  const batchOf = new Map<CliRun, number>();
+  batches.forEach((b, i) => { for (const r of b) batchOf.set(r, i); });
+  const keyed = new Map<string, CliRun[]>();
+  for (const r of all) { const o = opening(r); if (o) { const k = `${r.tool}\0${o}\0${folderKey(r.cwd)}`; keyed.set(k, [...(keyed.get(k) ?? []), r]); } }
+  const series = [...keyed.values()].filter((rs) => new Set(rs.map((r) => batchOf.get(r))).size > 1);
+  const inSeries = new Set(series.flat());
+  const out = [...batches.map((rs) => rs.filter((r) => !inSeries.has(r))).filter((rs) => rs.length).map((runs) => ({ runs, series: false })),
+    ...series.map((runs) => ({ runs, series: true }))];
+  batchCache = { at: Date.now(), value: out.map((b) => ({ id: `${b.runs[0].tool}-${b.runs[0].id}`, ...b })) };
   return batchCache.value;
 }
 
-function cliSummary(b: { id: string; runs: CliRun[] }) {
+const localDay = (t: number) => new Date(t).toDateString();
+function cliSummary(b: Batch) {
   const r0 = b.runs[0];
   const states = b.runs.map(cliState);
   const usage = b.runs.reduce((u, r) => add(u, { ...r.usage }), zero());
   const week = weekUsage();
-  // Runs that share a prompt opening are named by it; a mixed batch by its most common role, with a count.
+  // Runs that share a prompt opening are named by it; a mixed batch by its most common role, with a count. A series
+  // whose roles differ further on (one per person named) is named by the words they all start with.
   const roles = b.runs.map((r) => r.role);
   const common = [...new Set(roles)].sort((x, y) => roles.filter((r) => r === y).length - roles.filter((r) => r === x).length)[0];
-  const heading = new Set(roles).size === 1 ? common : `${common} +${new Set(roles).size - 1} more`;
+  const words = roles.map((r) => r.split(/\s+/));
+  let n = 0; while (n < words[0].length && words.every((ws) => ws[n] === words[0][n])) n++;
+  const shared = words[0].slice(0, n);
+  const heading = new Set(roles).size === 1 ? common : b.series ? `${shared.join(" ")}…` : `${common} +${new Set(roles).size - 1} more`;
   const cmd = r0.tool === "claude" ? "claude -p" : "codex exec";
+  const days = new Set(b.runs.map((r) => localDay(r.startedAt))).size;
   return {
-    project: shortProject(r0.projectKey), projectKey: r0.projectKey, session: b.id, runId: CLI,
-    kind: "cli", tool: r0.tool,
+    // A series spans folders; it is shown by the repository they share (R-L9).
+    project: shortProject(b.series ? encodeCwd(folderKey(r0.cwd)) : r0.projectKey), projectKey: b.series ? encodeCwd(folderKey(r0.cwd)) : r0.projectKey, session: b.id, runId: CLI,
+    kind: "cli", tool: r0.tool, series: b.series,
     name: `${r0.tool === "claude" ? "Claude" : "Codex"}${b.runs.length > 1 ? ` ×${b.runs.length}` : ""}: ${heading || r0.id}`,
-    description: `${b.runs.length} headless \`${cmd}\` run${b.runs.length > 1 ? "s" : ""} in ${r0.cwd}, started close together`,
+    description: b.series
+      ? `A series of ${b.runs.length} headless \`${cmd}\` runs over ${days} day${days > 1 ? "s" : ""}, in ${folderKey(r0.cwd)}, with the same prompt opening`
+      : `${b.runs.length} headless \`${cmd}\` run${b.runs.length > 1 ? "s" : ""} in ${r0.cwd}, started close together`,
     status: states.includes("running") ? "running" : states.includes("stopped") ? "stopped" : "completed",
     startTime: r0.startedAt, durationMs: null, usage,
     // Codex runs on a separate plan, so its share of Claude usage is meaningless.
@@ -674,16 +811,19 @@ function cliSummary(b: { id: string; runs: CliRun[] }) {
   };
 }
 
-function cliDetail(b: { id: string; runs: CliRun[] }) {
+function cliDetail(b: Batch) {
   // Each run is named by what tells it apart: its role when that is its own (one referee per journal, say), its last
   // heading when many runs share the role (one listener per paragraph), and both when the batch mixes the two.
   const roleCount = new Map<string, number>();
   for (const r of b.runs) roleCount.set(r.role, (roleCount.get(r.role) ?? 0) + 1);
+  const folders = new Set(b.runs.map((r) => r.cwd)).size;
   const agents = b.runs.map((r, i) => {
     const state = cliState(r);
     return {
       agentId: r.id, label: (() => { const role = r.role, head = r.label;
         if (r.turns! > 1) return `${r.lastLabel ?? "turn"} · ${r.turns} turns`;
+        // In a series fired from one folder per item, the folder is what tells the runs apart (a meeting's, say).
+        if (b.series && folders > 1) return `${r.cwd.split("/").filter(Boolean).at(-1)}${head ? ` · ${head}` : ""}`;
         return (roleCount.get(role)! > 1 ? (head && roleCount.size > 1 ? `${role} · ${head}` : head ?? role) : role || head) || `run ${i + 1}`; })(), type: r.tool, state,
       phase: { running: "Running", done: "Done", stopped: "Stopped" }[state],
       startedAt: r.startedAt, lastActivity: mtime(r.file), model: r.model, effort: r.effort, usage: r.usage, tools: r.tools,
@@ -721,6 +861,7 @@ function codexTranscript(f: string) {
 }
 
 function transcript(l: Loc, agentId: string) {
+  if ((l.runId === SESSION || l.runId === AGENTS) && agentId === MAIN) return claudeTranscript(sessionFile(l));
   if (l.runId === CLI) {
     const r = cliBatches().find((b) => b.id === l.session)?.runs.find((r) => r.id === agentId);
     return !r ? [] : r.tool === "codex" ? codexTranscript(r.file) : claudeTranscript(r.file);
@@ -728,29 +869,33 @@ function transcript(l: Loc, agentId: string) {
   return claudeTranscript(join(runDir(l), `agent-${agentId}.jsonl`));
 }
 
+// A transcript is followed as it grows: an open live session is read on from where the last poll stopped, not
+// parsed again whole every few seconds (R-C4). Only the last few opened are kept (R-L12).
+const transcripts = new Map<string, { key: string; st: Followed<any> }>();
 function claudeTranscript(f: string) {
-  const out: any[] = [];
-  for (const x of jsonl(f)) {
-    if (x.type !== "user" && x.type !== "assistant") continue;
+  const ev = follow<any[]>("transcript", f, () => [], undefined, (out, l) => {
+    let x: any; try { x = JSON.parse(l); } catch { return; }
+    if (x.type !== "user" && x.type !== "assistant") return;
     const c = x.message?.content;
     const ts = x.timestamp;
-    if (typeof c === "string") { out.push({ kind: x.type === "user" ? "prompt" : "text", text: c, ts }); continue; }
-    for (const p of c ?? []) {
+    if (typeof c === "string") { out.push({ kind: x.type === "user" ? "prompt" : "text", text: c, ts }); return; }
+    for (const p of Array.isArray(c) ? c : []) {
       if (p.type === "text") out.push({ kind: x.type === "user" ? "prompt" : "text", text: p.text, ts });
       else if (p.type === "tool_use") out.push({ kind: "tool", id: p.id, name: p.name, desc: p.input?.description, cmd: p.input?.command,
         text: toolHint(p.input), input: JSON.stringify(p.input, null, 2), ts });
       else if (p.type === "tool_result") {
-        const t = typeof p.content === "string" ? p.content : (p.content ?? []).filter((q: any) => q.type !== "image").map((q: any) => q.text ?? `[${q.type}]`).join("\n");
+        const t = typeof p.content === "string" ? p.content : (Array.isArray(p.content) ? p.content : []).filter((q: any) => q.type !== "image").map((q: any) => q.text ?? `[${q.type}]`).join("\n");
         // Images a tool returned (a screenshot it read, say), small enough to send to the page.
         // Only known image types and plain base64, since the URL goes into the page's HTML.
         const images = (Array.isArray(p.content) ? p.content : []).filter((q: any) => q.type === "image" && typeof q.source?.data === "string" && q.source.data.length < 3e6
           && /^image\/(png|jpeg|gif|webp)$/.test(q.source.media_type ?? "image/png") && /^[A-Za-z0-9+/=\s]*$/.test(q.source.data))
           .map((q: any) => `data:${q.source.media_type ?? "image/png"};base64,${q.source.data}`);
-        out.push({ kind: "output", for: p.tool_use_id, images, text: t.length > 20000 ? t.slice(0, 20000) + "\n… (cut)" : t, error: !!p.is_error, ts });
+        out.push({ kind: "output", for: p.tool_use_id, images, text: own(t.length > 20000 ? t.slice(0, 20000) + "\n… (cut)" : t), error: !!p.is_error, ts });
       }
     }
-  }
-  return out;
+  }, { persist: false, cache: transcripts });
+  while (transcripts.size > 8) transcripts.delete(transcripts.keys().next().value!);
+  return ev;
 }
 
 // Search inside transcripts: every agent Flowscope shows, by what it said, was told, ran or got back. The transcripts
@@ -775,7 +920,7 @@ function searchable() {
   const idOf = (f: string) => { const id = f.match(/^agent-(.+)\.jsonl$/)?.[1]; return id && SAFE.test(id) ? id : null; };
   for (const project of ls(ROOT).filter((n) => SAFE.test(n))) for (const session of ls(join(ROOT, project)).filter((n) => SAFE.test(n))) {
     const sub = join(ROOT, project, session, "subagents");
-    for (const f of ls(sub)) { const id = idOf(f); if (id) files.set(join(sub, f), { run: `${session}/${AGENTS}`, agentId: id, label: label(sub, id) }); }
+    for (const f of ls(sub)) { const id = idOf(f); if (id) files.set(join(sub, f), { run: `${session}/${SESSION}`, agentId: id, label: label(sub, id) }); }
     for (const wf of ls(join(sub, "workflows")).filter((n) => SAFE.test(n))) for (const f of ls(join(sub, "workflows", wf))) {
       const id = idOf(f); if (id) files.set(join(sub, "workflows", wf, f), { run: `${session}/${wf}`, agentId: id, label: label(join(sub, "workflows", wf), id) });
     }
@@ -877,7 +1022,7 @@ Bun.serve({
     const l = locFrom(u);
     if (!l) return text("bad request", 400);
     if (u.pathname === "/api/run") {
-      if (l.runId !== CLI) return json200(l.runId === AGENTS ? agentsDetail(l) : detail(l));
+      if (l.runId !== CLI) return json200(l.runId === SESSION || l.runId === AGENTS ? sessionDetail({ ...l, runId: SESSION }) : detail(l));
       const b = cliBatches().find((b) => b.id === l.session);
       return b ? json200(cliDetail(b)) : text("not found", 404);
     }

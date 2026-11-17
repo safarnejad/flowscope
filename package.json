@@ -1,7 +1,7 @@
 {
   "name": "flowscope",
-  "version": "0.1.0",
-  "description": "A live, local, read-only view of Claude Code workflows, subagents and headless Claude/Codex CLI runs.",
+  "version": "0.2.0",
+  "description": "A live, local, read-only view of Claude Code sessions, subagents and workflows, and headless Claude Code and Codex CLI runs.",
   "license": "MIT",
   "author": "Mahdi Safarnejad",
   "repository": {

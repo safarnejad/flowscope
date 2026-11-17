@@ -37,7 +37,9 @@ afterAll(() => { srv?.kill(); rmSync(dir, { recursive: true, force: true }); });
 
 test("F-13.1 F-13.2 lists every kind of run, newest activity first", async () => {
   const rs = await runs();
-  expect(rs.map((r) => r.kind).sort()).toEqual(["agents", "cli", "cli", "workflow", "workflow"]);
+  // Sessions (X1, X2, X4, X10, X11), workflows (X1, X2), the batches (X5, X6) and the series (X12); no "agents" kind.
+  const count = (k: string) => rs.filter((r) => r.kind === k).length;
+  expect([count("session"), count("workflow"), count("cli"), rs.length]).toEqual([6, 2, 4, 12]);
   // Phases come from the script while a workflow has no final record, written with quoted keys or without.
   expect((await detail(rs.find((r) => r.name === "money-migration"))).phases).toHaveLength(3);
   for (let i = 1; i < rs.length; i++) expect(rs[i - 1].lastActivity).toBeGreaterThanOrEqual(rs[i].lastActivity);
@@ -82,7 +84,7 @@ test("F-4.6 F-4.7 a live workflow: running, one agent waiting on a tool, phases 
 
 test("F-5.1 F-5.2 F-5.3 plain subagents: handback, text answer, working, usage limit", async () => {
   const r = await byName("Payments clean-up");
-  expect(r.kind).toBe("agents");
+  expect(r.kind).toBe("session");
   const d = await detail(r);
   expect(d.phases.map((p: any) => p.title)).toEqual(["Running", "Done", "Stopped"]);
   const a = Object.fromEntries(d.agents.map((x: any) => [x.label, x]));
@@ -247,8 +249,10 @@ test("F-1.5 R-S7 keeps its cache private", () => {
   for (const f of readdirSync(join(dir, "cache"))) expect(statSync(join(dir, "cache", f)).mode & 0o777).toBe(0o600);
 });
 
-test("F-1.6 help names Codex, CLI runs and every environment variable", () => {
+test("F-1.6 help says what it covers, names Codex, CLI runs and every environment variable", () => {
   const out = Bun.spawnSync([process.execPath, SERVER, "--help"]).stdout.toString();
+  // The first line says what it covers.
+  expect(out.split("\n")[0]).toBe("flowscope: a live view of Claude Code sessions, subagents and workflows, and of headless Claude Code and Codex CLI runs");
   for (const s of ["claude -p", "codex exec", "FLOWSCOPE_PORT", "CLAUDE_PROJECTS_DIR", "CODEX_SESSIONS_DIR", "FLOWSCOPE_CACHE", "4747", "--foreground", "--port", "--open", "stop"])
     expect(out).toContain(s);
 });
@@ -275,6 +279,95 @@ test("F-1.4 R-S11 stop leaves alone another program on the port", async () => {
     expect(out.stdout.toString()).toContain("not running");
     expect((await fetch(`http://127.0.0.1:${PORT + 200}/`)).ok).toBe(true);
   } finally { other.stop(true); }
+});
+
+test("F-14.1 R-L11 every session is a run, named by its AI title or else its first prompt, and an empty one is left out", async () => {
+  const rs = await runs();
+  const live = rs.find((r) => r.session.endsWith("000000000010")), old = rs.find((r) => r.session.endsWith("000000000011"));
+  expect([live.kind, live.runId, live.name, live.status]).toEqual(["session", "session", "Spring sale plan", "running"]);
+  // A command's echo is not a prompt; the first line is cut at a word boundary (R-L11).
+  expect(old.name).toBe("Rename the cart module to basket everywhere, and keep the old name…");
+  expect(old.status).toBe("completed");
+  expect(old.usage.output).toBeGreaterThan(0);
+  expect(rs.some((r) => r.session.endsWith("000000000012"))).toBe(false);
+  // Headless sessions stay CLI runs: no session row for any of X5's 40.
+  expect(rs.filter((r) => r.kind === "session" && r.session.startsWith("9e0f1a2b"))).toEqual([]);
+});
+
+test("F-14.2 R-T1 a session that launched subagents is one run, dated and kept running by its conversation", async () => {
+  const rs = await runs();
+  const r = rs.find((x) => x.name === "Cheaper shipping");
+  expect(rs.filter((x) => x.session === r.session)).toHaveLength(1);
+  expect([r.kind, r.status, r.agents, r.agentsDone, r.agentsRunning]).toEqual(["session", "running", 2, 2, 0]);
+  const f = join(data.claude, r.projectKey, `${r.session}.jsonl`);
+  expect(r.lastActivity).toBe(statSync(f).mtimeMs);
+  // Its agents finished two days ago; it still sorts among today's runs.
+  expect(rs.indexOf(r)).toBeLessThan(rs.findIndex((x) => x.name.startsWith("Claude ×40")));
+  const d = await detail(r);
+  expect(d.agents.map((a: any) => a.state)).toEqual(["done", "done"]);
+  expect(d.main.agentId).toBe("main");
+  expect(d.main.state).toBe("running");
+  expect(d.main.now).toContain("Drafting the plan");
+  expect(d.resume).toBe(`cd /home/dev/acme-shop && claude --resume ${r.session}`);
+});
+
+test("F-14.5 a session lists the workflows it launched, and the workflow stays a run of its own", async () => {
+  const rs = await runs();
+  const s = rs.find((x) => x.kind === "session" && x.name === "Money migration"), w = rs.find((x) => x.name === "money-migration");
+  expect(s.workflows).toBe(1);
+  expect(w.kind).toBe("workflow");
+  expect(w.session).toBe(s.session);
+  expect((await detail(s)).workflows.map((x: any) => [x.runId, x.name])).toEqual([[w.runId, "money-migration"]]);
+});
+
+test("F-14.6 a link from 0.1 to a session's subagents answers the session", async () => {
+  const r = await byName("Payments clean-up");
+  const old = await (await get(`/api/run?p=${r.projectKey}&s=${r.session}&r=agents`)).json();
+  expect([old.kind, old.runId, old.agents.length]).toEqual(["session", "session", 4]);
+  const a = old.agents[0].agentId;
+  expect((await (await get(`/api/agent?p=${r.projectKey}&s=${r.session}&r=agents&a=${a}`)).json()).length).toBeGreaterThan(0);
+});
+
+test("F-14.9 R-L14 a conversation's Latest reply is Claude's answer to the last prompt", async () => {
+  const r = (await runs()).find((x) => x.name === "Cheaper shipping");
+  const d = await detail(r);
+  // The earlier answer ("Shall I draft the plan?") was before the last prompt, so it is not the latest reply.
+  expect(d.main.result).toBe("Drafting the plan: two carriers, one rate table.");
+});
+
+test("F-14.7 R-C4 the conversation's transcript is read as it grows", async () => {
+  const r = (await runs()).find((x) => x.name === "Spring sale plan");
+  const url = `/api/agent?${q(r)}&a=main`;
+  const ev = await (await get(url)).json();
+  expect(ev[0]).toMatchObject({ kind: "prompt", text: expect.stringContaining("Plan the spring sale") });
+  expect(ev.map((e: any) => e.kind)).toEqual(["prompt", "text", "tool", "output", "text"]);
+  const f = join(data.claude, r.projectKey, `${r.session}.jsonl`);
+  // A line still being written is not read until it ends.
+  const line = JSON.stringify({ type: "assistant", timestamp: new Date().toISOString(), message: { id: "m-more", role: "assistant", content: [{ type: "text", text: "Banner copy drafted." }] } });
+  appendFileSync(f, line.slice(0, 40));
+  expect((await (await get(url)).json()).length).toBe(5);
+  appendFileSync(f, line.slice(40) + "\n");
+  const again = await (await get(url)).json();
+  expect(again.length).toBe(6);
+  expect(again.at(-1).text).toBe("Banner copy drafted.");
+  expect((await detail(r)).main.now).toBe("Banner copy drafted.");
+});
+
+test("F-7.8 R-L13 an app's calls fired one per item over days are a series each, not a batch per day", async () => {
+  const rs = await runs();
+  const cli = rs.filter((r) => r.kind === "cli" && r.tool === "claude");
+  const titles = cli.find((r) => r.name === "Claude ×15: Give this meeting a short title from what was said");
+  const notes = cli.find((r) => r.name === "Claude ×15: You write the notes of a meeting for…");
+  expect([titles.series, notes.series]).toEqual([true, true]);
+  // No batch is left holding any of those 30 runs; X5's batch is not a series.
+  expect(cli.filter((r) => r.project.includes("items"))).toHaveLength(2);
+  expect(cli.find((r) => r.name.startsWith("Claude ×40")).series).toBe(false);
+  const d = await detail(titles);
+  expect(d.agents).toHaveLength(15);
+  expect(titles.lastActivity).toBe(Math.max(...d.agents.map((a: any) => a.lastActivity)));
+  // Each run is told apart by its own folder.
+  expect(new Set(d.agents.map((a: any) => a.label)).size).toBe(15);
+  expect(d.agents[0].label).toMatch(/^\d{4}-\d\d-\d\d-meeting-1$/);
 });
 
 // From here on the tests add hostile and broken input (X7–X9) to the tree.

@@ -10,7 +10,7 @@ Ids are stable. A rule that goes away is marked *retired* and its id is never re
 
 | ID | Rule | Value | Why |
 |---|---|---|---|
-| R-T1 | Live window. A run without a final record, an agent, or a CLI run is `running` while idle is under this, `stopped` once idle is at least this. | 15 min | An agent waiting on a long tool call (tests, a build) writes nothing until it returns; a shorter window shows healthy runs as stopped. |
+| R-T1 | Live window. A run without a final record, a session, an agent, or a CLI run is `running` while idle is under this, `stopped` once idle is at least this (a session at rest is `completed` unless a subagent of it stopped; see ARCHITECTURE, *Run status*). | 15 min | An agent waiting on a long tool call (tests, a build) writes nothing until it returns; a shorter window shows healthy runs as stopped. |
 | R-T2 | Quiet before done. A plain subagent with a report, or a Claude CLI run that ended on text, is `done` once idle is over this (a subagent whose meta says `finished` needs no wait). | 5 s | Text written mid-turn is soon followed by a tool call; without the wait a working agent flickers to `done`. |
 | R-T3 | A run summary is cached in memory and recomputed when a file in it changes, or when idle crosses 10 s or R-T1. | 10 s | Lets R-T2 take effect without a file change, while unchanged runs cost one directory listing per poll. |
 | R-T4 | Week window: files modified within the last 7 days contribute their hourly usage buckets that start no earlier than 7 days and 1 hour ago. | 7 days | The closest local stand-in for a weekly plan limit. |
@@ -24,7 +24,7 @@ Ids are stable. A rule that goes away is marked *retired* and its id is never re
 | R-T12 | The foreground server builds the run list once, this long after it starts listening (cache warm at boot). | 50 ms | The first page load is then fast. |
 | R-T13 | Idle HTTP connections are closed after this. | 30 s | Bun's `idleTimeout`. |
 | R-T20 | The page polls `/api/runs` every 3 s, and `/api/run` for the open run while it is `running`. `/api/format` every 60 s. | 3 s / 60 s | Live enough to watch; each unchanged poll is a `304`. |
-| R-T21 | Quiet run: a `running` run idle over this is flagged amber "quiet" in the sidebar and home, listed under **Needs a look**, and notified once (again only after it has been idle under this in between). | 10 min | Long enough not to cry wolf during a long tool call. |
+| R-T21 | Quiet run: a `running` run idle over this is flagged amber "quiet" in the sidebar and home, listed under **Needs a look**, and notified once (again only after it has been idle under this in between). A session counts only while one of its subagents is running. | 10 min | Long enough not to cry wolf during a long tool call. A conversation is quiet whenever its person reads or thinks; that is not trouble. |
 | R-T22 | Silent agent: a `running` agent with no pending tool call, idle over this. | 10 min | Same as R-T21, per agent. |
 | R-T23 | Stuck wait: a tool call pending for over this is red, says "possibly stuck", is listed under **Needs a look**, and puts `⚠` in the page title. | 10 min | |
 | R-T24 | Long wait: a tool call pending for over this is amber. | 2 min | Worth noticing, not yet worth checking. |
@@ -39,7 +39,7 @@ Ids are stable. A rule that goes away is marked *retired* and its id is never re
 | ID | Rule | Value | Why |
 |---|---|---|---|
 | R-L1 | A single transcript line longer than this is skipped up to its next newline; the rest of the file is read. | 64 MB | One huge line cannot grow memory without bound. |
-| R-L2 | Files are read through one buffer of 8 MB; a headless Claude session is recognised from its first 512 KB; the GC is forced before the next file once over 128 MB has been read since the last time. | 8 MB / 512 KB / 128 MB | Bun keeps memory it has once used, so the peak is what stays. |
+| R-L2 | Files are read through one buffer of 8 MB; a session file's first 512 KB (its head) tell whether it is headless, and give its folder, first prompt and start; the GC is forced before the next file once over 128 MB has been read since the last time. | 8 MB / 512 KB / 128 MB | Bun keeps memory it has once used, so the peak is what stays. A session runs to hundreds of MB; the list reads only its head, the lines holding a needle, and what it grew by. |
 | R-L3 | Search query, after trimming: under 3 characters returns no hits; over 200 characters is refused with `400`. | 3 / 200 chars | Short queries match everything; long ones cost time for nothing. |
 | R-L4 | Search returns at most 200 hits, by file modification time, newest first. Each hit's snippet is the first matching line's text from 60 characters before the match to 100 after its end, whitespace collapsed, with a leading `…` when the match is over 60 characters in. Places are counted up to 1,000. The page shows `200+` when it gets 200. | 200 / 60 / 100 / 1,000 | Bounded work per search. |
 | R-L5 | A tool output in a transcript is cut to this many characters, followed by `… (cut)`. | 20,000 chars | |
@@ -48,7 +48,11 @@ Ids are stable. A rule that goes away is marked *retired* and its id is never re
 | R-L8 | A run's role: its prompt's first non-empty line, without leading `#`s or a leading "You are", "You're", "Act as" or "Tu" (and a following "a", "an", "the"), up to its first sentence end; 71 characters or longer is cut to 68 at a word boundary plus `…`. | 68 chars | |
 | R-L9 | CLI runs are grouped by tool and by the first five folders of their working directory. | 5 folders | One repository, even when runs start in different subfolders. |
 | R-L10 | Index build yields to requests every 20 files. | 20 files | The server stays responsive while it reads gigabytes. |
-| R-L20 | Table mode: a run with over 30 agents shows a table instead of the board; J/K step through the table's filtered rows. | 30 agents | Hundreds of cards do not read. |
+| R-L11 | A session's name: its latest `ai-title`; else the first non-empty line of its first prompt (a user line that is not `isMeta` and does not start with `<`, such as a command's echo), 71 characters or longer cut to 68 at a word boundary plus `…`. A session with neither, and no subagents, is not listed. | 68 chars | A session opened and left has nothing to show. |
+| R-L12 | Transcripts followed in memory (R-C4): at most this many, the least recently opened dropped first. | 8 | An open live session is read on, not again, on each poll; a few are open at a time. |
+| R-L13 | Series: CLI runs of one tool, grouped by folder as in R-L9, whose roles (R-L8) start with the same five words (case ignored) are one series when they fall in more than one batch. A series is one run; its runs leave their batches. | 5 words | An app that fires the same call for each item (a title per meeting) from the item's own folder, hours or days apart, is one job, not a batch per day. The words after the fifth often name the item or person ("…a meeting for Ana"). Runs that all fall in one batch stay that batch. |
+| R-L14 | A session's card (its current action, pending tool call, model, peak context) is read from the last 1 MB of its file. | 1 MB | Only the end of a conversation says what it is doing now. |
+| R-L20 | Table mode: a run with over 30 agents, or any series (R-L13), shows a table instead of the board, grouped by the day each run started when they span more than one; J/K step through the table's filtered rows. | 30 agents | Hundreds of cards do not read; a series is days apart. |
 | R-L21 | The table shows 100 rows, and **Show more** adds 200; a result is shown to 200 characters. | 100 / 200 | |
 | R-L22 | A done agent's result is "empty or one word" when it has at most 2 words. | 2 words | Catches `OK`, `Done.` |
 | R-L23 | The sidebar's **Recent** shows 3 finished runs; home's **Finished lately** 6. | 3 / 6 | |
@@ -78,8 +82,9 @@ Ids are stable. A rule that goes away is marked *retired* and its id is never re
 | ID | Rule | Value | Why |
 |---|---|---|---|
 | R-C1 | Per-file results on disk are keyed by the file's `mtime:size`; a changed file is parsed again. | | |
-| R-C2 | Each stored kind is suffixed with `@VERSION`. Bump `VERSION` whenever a stored shape (`usage`, `end`, `cli`, `answer`) or the way it is worked out changes; old entries are then not found. | `VERSION = 1` | Deleting the cache folder is always safe too. |
+| R-C2 | Each stored kind is suffixed with `@VERSION`. Bump `VERSION` whenever a stored shape (`usage`, `title`, `head`, `end`, `cli`, `answer`) or the way it is worked out changes; old entries are then not found. | `VERSION = 2` | Deleting the cache folder is always safe too. |
 | R-C3 | Cache location: `$FLOWSCOPE_CACHE`, default `~/.claude/flowscope`; files `cache.db` (SQLite, WAL) and, in background mode, `flowscope.log`. | | |
+| R-C4 | Followed files: a session's title, every file's usage, and an open transcript keep the byte offset read so far and a hash of the file's first 256 bytes. A file that grew is read from that offset, complete lines only; one whose first bytes changed, or that shrank, is read again from the start. | 256 bytes | Claude Code appends to its files; a live session would otherwise be read whole on every change. |
 
 ## R-K: counting
 
@@ -100,7 +105,7 @@ Ids are stable. A rule that goes away is marked *retired* and its id is never re
 | R-U4 | `pct`: missing `—` (a Codex batch); 0 `0%`; under 0.001 `<0.1%`; under 0.1 one decimal; else whole percent. | | |
 | R-U5 | Persian text: over 20 characters in U+0600–U+06FF within the first 300 gets `lang="fa"` and its own face and line height. | 20 / 300 | |
 | R-U6 | Block direction: right to left when the block has more Hebrew/Arabic-script letters than Latin ones; with neither, by its first strong letter. Applied to each list, table, quote, paragraph, list item, heading and cell. | majority | An English sentence quoting one Persian word stays LTR. |
-| R-U7 | Theme, run filter, transcript filter and notifications are kept in `localStorage` (`flowscope.theme`, `.filter`, `.tfilter`, `.notify`); everything else is in memory or the URL hash. | | |
+| R-U7 | Theme, run filter, transcript filter and notifications are kept in `localStorage` (`flowscope.theme`, `.filter`, `.tfilter`, `.notify`); everything else is in memory or the URL hash. The run filter is one of `all`, `session`, `agents`, `workflow`, `cli`; any other kept value means `all`. | | The values kept by 0.1 (`all`, `workflow`, `agents`, `cli`) mean the same in 0.2. |
 
 ## R-P: process
 

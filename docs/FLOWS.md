@@ -15,7 +15,7 @@ Time-based states are tested by setting file times (`utimes`), not by waiting.
 
 ## Fixtures
 
-`scripts/demo.ts` writes X1, X2, X4, X5 and X6; the tests derive X3, X7, X8 and X9 from them.
+`scripts/demo.ts` writes X1, X2, X4, X5, X6 and X10–X12; the tests derive X3, X7, X8 and X9 from them.
 
 | Id | Content |
 |---|---|
@@ -28,6 +28,9 @@ Time-based states are tested by setting file times (`utimes`), not by waiting.
 | X7 | Hostile input: a tool result with a non-image and an attribute-breaking media type; headless Claude and Codex runs whose ids are not safe names; a symbolic link to a headless session outside the root; a transcript with a line over 64 MB. |
 | X8 | A journal with an event of an unknown type. |
 | X9 | A workflow whose final record has a `workflowProgress` that is not a list. |
+| X10 | Plain conversations, no subagents: one live with an `ai-title` and a tool call; one from three days ago with no title whose first user line is a command's echo (`<command-name>…`) and whose first prompt is over 68 characters; one with no prompt and no title. |
+| X11 | A live conversation (file written minutes ago) whose two subagents finished two days ago. |
+| X12 | An app's `claude -p` calls over five days, each from its meeting's own folder under one repository: 15 title calls with one prompt opening, and 15 notes calls whose openings differ after the fifth word ("…a meeting for Ana"); each meeting's two calls start together. |
 
 ## 1. Start and stop
 
@@ -38,7 +41,7 @@ Time-based states are tested by setting file times (`utimes`), not by waiting.
 | F-1.3 | Flowscope running | `bun server.ts stop` | it stops; `/api/pid` no longer answers | F-1.2 F-1.3 R-S7 starts in the background once, and stop stops it |
 | F-1.4 | another program answers `/api/pid` on the port without `x-flowscope` | `stop` | reports that Flowscope is not running and kills nothing | F-1.4 R-S11 stop leaves alone another program on the port |
 | F-1.5 | a start | — | the cache folder exists with mode `0700`; `cache.db` and its WAL files are `0600`; the background log is in the folder and `0600` (R-S7) | F-1.5 R-S7 keeps its cache private |
-| F-1.6 | — | `--help` | names Claude Code workflows and subagents, `claude -p` and `codex exec` runs, and every environment variable with its default | F-1.6 help names Codex, CLI runs and every environment variable |
+| F-1.6 | — | `--help` | its first line says it covers Claude Code sessions, subagents and workflows and headless Claude Code and Codex CLI runs; it names `claude -p` and `codex exec`, and every environment variable with its default | F-1.6 help says what it covers, names Codex, CLI runs and every environment variable |
 
 ## 2. Home page
 
@@ -46,7 +49,7 @@ Given X1, X2, X3, X4. Open `/`.
 
 | ID | Given | When | Then | Test |
 |---|---|---|---|---|
-| F-2.1 | runs of every state | open `/` | the sidebar has **Running** with X2 and the X4 agent group, **Recent** with up to 3 finished runs (R-L23); older ones sit behind **History (N) ›** | F-2.1 F-2.2 R-L23 R-K3 home: running, recent and history in the sidebar, Now with today's counts |
+| F-2.1 | runs of every state | open `/` | the sidebar has **Running** with X2 and the X4 session, **Recent** with up to 3 finished runs (R-L23); older ones sit behind **History (N) ›** | F-2.1 F-2.2 R-L23 R-K3 home: running, recent and history in the sidebar, Now with today's counts |
 | F-2.2 | same | open `/` | the main area shows **Now** with the count running, runs active today and today's tokens (R-K3) | F-2.1 F-2.2 R-L23 R-K3 home: running, recent and history in the sidebar, Now with today's counts |
 | F-2.3 | X3, and a running run quiet over R-T21 | open `/` | **Needs a look** lists X3 as stopped (idle under R-T25) and the quiet run | F-2.3 R-T21 a running run quiet over 10 minutes is under Needs a look; F-9.2 F-2.3 F-4.10 R-T25 a run that stops is told once and its notice opens it, home lists it under Needs a look |
 | F-2.4 | a run open | click **Flowscope** | returns home and clears the URL hash | F-2.4 clicking Flowscope returns home and clears the hash |
@@ -55,10 +58,11 @@ Given X1, X2, X3, X4. Open `/`.
 
 | ID | Given | When | Then | Test |
 |---|---|---|---|---|
-| F-3.1 | all fixtures | click **Workflows** / **Agents** / **CLI**, reload | only X1–X3 / X4 / X5 and X6 show; the choice is kept (R-U7) | F-3.1 R-U7 the kind filter shows only that kind and is kept across a reload |
+| F-3.1 | all fixtures | the filters read **All · Sessions · Agents · Workflows · CLI**; click each, reload | Sessions shows every session; Agents only the sessions that launched subagents (X4, X11, …); Workflows X1–X3; CLI the batches and series. The choice is kept, a value kept by 0.1 means the same, and an unknown one falls back to All (R-U7) | F-3.1 R-U7 the kind filter shows only that kind and is kept across a reload |
 | F-3.2 | all fixtures | type part of a run's name | the list filters, grouped by day; no match shows "No run's name matches" | F-3.2 F-3.3 F-3.4 search: names by day, then hits inside transcripts that open the agent |
 | F-3.3 | text only inside a transcript | type at least 3 characters of it | **In transcripts** shows "Reading transcripts…" first (R-T27), then hits with the match highlighted; clicking a hit opens its run and that agent's transcript | F-3.2 F-3.3 F-3.4 search: names by day, then hits inside transcripts that open the agent |
 | F-3.4 | focus not in an input | press `/` | the search box takes focus | F-3.2 F-3.3 F-3.4 search: names by day, then hits inside transcripts that open the agent |
+| F-3.5 | All | look at a session's row | a session that launched subagents shows the subagents mark, one that launched workflows the workflow mark, each with a tooltip naming how many ("Launched 4 subagents"); other rows show none | F-3.5 in All, a session shows a mark for the subagents and the workflows it launched |
 
 ## 4. A workflow run
 
@@ -79,7 +83,7 @@ Given X1, X2, X3, X4. Open `/`.
 
 | ID | Given | When | Then | Test |
 |---|---|---|---|---|
-| F-5.1 | X4 | open it | the name is the latest `ai-title`; columns Running, Done, Stopped, empty ones hidden | F-5.1 F-5.2 F-5.3 plain subagents: handback, text answer, working, usage limit |
+| F-5.1 | X4 | open it | it is a `session` run; the name is the latest `ai-title`; its subagents' columns Running, Done, Stopped, empty ones hidden | F-5.1 F-5.2 F-5.3 plain subagents: handback, text answer, working, usage limit |
 | F-5.2 | X4 | open it | the background agent is Done with the handback message as its Result; the foreground one is Done with its last text | F-5.1 F-5.2 F-5.3 plain subagents: handback, text answer, working, usage limit |
 | F-5.3 | X4 | open it | the API-error agent is stopped with a red "usage limit" flag, and the strip leads with "1 agent hit a usage limit (…reset time…)" | F-5.1 F-5.2 F-5.3 plain subagents: handback, text answer, working, usage limit; F-5.3 a usage limit shows on the card and leads the needs-a-look strip |
 | F-5.4 | X4, a done agent | append a user prompt line to its transcript | within one poll it is Running and has no result | F-5.4 R-T2 a resumed subagent runs again |
@@ -106,6 +110,8 @@ Given X1, X2, X3, X4. Open `/`.
 | F-7.5 | X5, drawer open | `j`/`k` | follow the filtered table order | F-7.2 F-7.3 F-7.5 R-L20 R-L22 R-L25 a batch over 30 agents is a table, shape filters count, j/k follow the filtered rows |
 | F-7.6 | X5, drawer open | click the terminal button | copies `claude --resume <id>` for that run | F-7.1 F-7.3 F-7.6 R-T7 40 claude -p runs are one batch, named by their role, with two one-word answers; F-7.6 R-S12 the drawer's terminal button copies the run's resume command, its folder quoted |
 | F-7.7 | X6 | open it | share of the week is `—` (R-U4); the run with `task_complete` is Done, the other Running or Stopped by time | F-7.7 codex runs: done by task_complete, no share of the week |
+| F-7.8 | X12 | list runs | two series rows (R-L13): `Claude ×15: Give this meeting a short title from what was said` and `Claude ×15: You write the notes of a meeting for…` (named by the words their roles share), `series: true`, dated by their newest run; no batch of those runs is left; X5 stays one batch | F-7.8 R-L13 an app's calls fired one per item over days are a series each, not a batch per day |
+| F-7.9 | X12 | open the title series | a **Table** of all 15 runs although under R-L20 agents, grouped under one row per day, each run named by its folder | F-7.9 R-L20 a series opens as a table of all its runs, grouped by day, each named by its folder |
 
 ## 8. Timeline
 
@@ -167,3 +173,17 @@ Given X1, X2, X3, X4. Open `/`.
 | F-13.7 | — | an unknown CLI batch; an unknown path | `404` | F-13.7 unknown batches and paths are 404 |
 | F-13.8 | — | any API answer | carries the headers of R-S6 | F-13.8 R-S6 API answers are neither cached nor sniffed |
 | F-13.9 | safe names that match no run | `GET /api/run` | `200` with an empty run; `/api/agent` an empty list | F-13.9 safe names that match nothing are an empty run, not an error |
+
+## 14. Sessions
+
+| ID | Given | When | Then | Test |
+|---|---|---|---|---|
+| F-14.1 | X10, X5 | list runs | each conversation is one `session` run, the live one `running` and named by its `ai-title`, the old one `completed` and named by its first prompt (R-L11) with its tokens counted; the empty one is not listed; no headless session is a session run | F-14.1 R-L11 every session is a run, named by its AI title or else its first prompt, and an empty one is left out |
+| F-14.2 | X11 | list runs | one row for the session and its subagents, `running`, dated by the conversation's file (R-T1), above runs from earlier today; its detail has the conversation as agent `main` with its latest words | F-14.2 R-T1 a session that launched subagents is one run, dated and kept running by its conversation |
+| F-14.3 | X10 live | click it in the sidebar | it launched nothing, so the drawer opens at once on the conversation's **Transcript**, hash `#<session>/session/main`; Esc closes it and shows the session's page with its **Conversation** card and no board | F-14.3 a session that launched nothing opens on its conversation, and Esc shows its page |
+| F-14.4 | X11 | open it | the **Conversation** card (its latest action, R-L14) sits above **Subagents** and their board; clicking it opens the conversation in the drawer; `j` steps on to the first subagent | F-14.4 R-L14 a session with subagents shows its conversation above its subagents' board |
+| F-14.5 | X2's session | open it | **Workflows it launched** lists X2, which opens it; X2 stays a run of its own, and its page says "Launched from" the session, which opens it | F-14.5 a session lists the workflows it launched, and the workflow stays a run of its own; F-14.5 a session lists the workflows it launched, and the workflow links back to it |
+| F-14.6 | X4 | `GET /api/run?…&r=agents`, or open a 0.1 link `#<session>/agents/<agent>` | the session is answered and opened, with that agent in the drawer | F-14.6 a link from 0.1 to a session's subagents answers the session; F-14.6 a link from 0.1 to a session's subagents opens the session and the agent |
+| F-14.7 | X10 live | `GET /api/agent?…&r=session&a=main`, then append half a line, then the rest | the conversation as events; the half line is not read until it ends; then it is, and the card's latest action follows (R-C4) | F-14.7 R-C4 the conversation's transcript is read as it grows |
+| F-14.8 | X10 live quiet 12 minutes; X10 old; the session of `Long build` | open `/` | X10 live is `running` but not quiet and not under **Needs a look**, nor is X10 old; `Long build`, whose subagent runs, is (R-T21) | F-14.8 R-T21 a conversation at rest needs no look, and one is quiet only while a subagent of it runs |
+| F-14.9 | X11; X10 live | open the conversation (it opens on **Transcript**), then **Latest reply** (`r`) | it shows Claude's text since the last prompt, the same as `main.result` in the run's detail; a conversation whose last prompt has no answer yet says so instead of "No result yet" | F-14.9 R-L14 a conversation's Latest reply is Claude's answer to the last prompt; F-14.9 a conversation's Latest reply tab shows Claude's answer to the last prompt |

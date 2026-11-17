@@ -6,7 +6,7 @@
 
 <p align="center">
   <b>See what your AI agents are doing — live.</b><br>
-  A local, read-only dashboard for Claude Code workflows, subagents, and headless <code>claude -p</code> / <code>codex exec</code> runs.
+  A local, read-only dashboard for Claude Code sessions, subagents and workflows, and headless <code>claude -p</code> / <code>codex exec</code> runs.
 </p>
 
 <p align="center">
@@ -26,10 +26,10 @@
 </p>
 
 <p align="center">
-  <img src="docs/img/tour.gif" alt="A tour of Flowscope: a live workflow's board, an agent waiting on a tool, its transcript, the timeline, and a batch of 40 claude -p runs" width="900">
+  <img src="docs/img/tour.gif" alt="A tour of Flowscope: sessions, workflows and CLI runs in the sidebar, a live workflow's board, an agent waiting on a tool, its transcript, the timeline, a conversation, and a series of claude -p calls over five days" width="900">
 </p>
 
-You launched a workflow with 30 agents, or a script that fires 200 `claude -p` calls, and went back to work. Now: is it moving? Is one agent stuck on a test run? Did half of them hit the usage limit? What did agent 17 actually say?
+You launched a workflow with 30 agents, or a script that fires 200 `claude -p` calls, or left a conversation thinking, and went back to work. Now: is it moving? Is one agent stuck on a test run? Did half of them hit the usage limit? What did agent 17 actually say?
 
 The Claude Code extension shows little of this. **Flowscope reads the files Claude Code and Codex already write and turns them into a live board** — no hooks, no SDK, no setup, nothing sent anywhere.
 
@@ -40,7 +40,8 @@ bunx flowscope --open    # serves http://127.0.0.1:4747 in the background and op
 ## What you get
 
 **Watch it run**
-- 🧭 **Every run on this machine, across projects** — workflows, a session's subagents, and batches of headless CLI runs — with status: `running`, `completed`, `failed`, `stopped`.
+- 🧭 **Every run on this machine, across projects** — every Claude Code session (with the subagents it launched), workflows, and headless CLI runs — with status: `running`, `completed`, `failed`, `stopped`. Filter by **All · Sessions · Agents · Workflows · CLI**; in All, small marks show which sessions launched subagents or workflows.
+- 💬 **Every conversation**, named by its title, dated by its last word: open one to read it like an agent's transcript, with its subagents and the workflows it started (each also its own row, linked both ways).
 - 🗂️ **Phases as columns, agents as cards** — what each agent is doing *right now*, how long it has waited on a tool, its tool calls, tokens and peak context.
 - ⏱️ **Timeline** — one lane per agent on a shared axis: what ran alongside what, and which agent held the run up. Long idle stretches are cut out so runs hours apart stay readable.
 - 🔔 **Browser notifications** when a run finishes, fails, stops, or goes quiet for 10 minutes.
@@ -48,6 +49,7 @@ bunx flowscope --open    # serves http://127.0.0.1:4747 in the background and op
 **Spot trouble fast**
 - 🚨 **Needs a look** — agents silent for 10 minutes, stuck on a tool, stopped, ended on a usage limit (with its reset time), or that answered only "OK".
 - 📊 **Big batches become a table** — 40 or 400 runs, one row each with the start of its answer, filters for *Answers / Empty or one word / Running / Stopped*, and search.
+- 🔁 **An app's repeating calls are one series** — the same `claude -p` call made for each meeting, from each meeting's folder, over days, is one row with a count, not fifteen; it opens as a table grouped by day.
 
 **Dig in**
 - 📝 **Result and full transcript** for each agent: the task, every tool call with its input and output, rendered Markdown, highlighted code, JSON as tables, screenshots the agent saw.
@@ -146,7 +148,8 @@ CLAUDE_PROJECTS_DIR=/tmp/flowscope-demo/claude CODEX_SESSIONS_DIR=/tmp/flowscope
 
 ## Reading the page
 
-- **Left:** workflow runs and agent sessions together, most recently active first, filtered by the **All / Workflows / Agents / CLI** buttons (the choice is remembered). Each line shows its kind, status, agents finished out of started, and its share of the week's usage.
+- **Left:** sessions, workflow runs and CLI runs together, most recently active first, filtered by the **All / Sessions / Agents / Workflows / CLI** buttons (the choice is remembered; **Agents** are the sessions that launched subagents). Each line shows its status, agents going out of started, its kind, marks for the subagents and workflows a session launched, and when it was last active.
+- **A session:** its **Conversation** card (latest action, model, tokens), the workflows it launched, then its subagents' board. A session that launched nothing opens straight into its conversation.
 - **Top of a run:** agents done, agents running now, elapsed time, tokens (input, cache writes and output; hover for the split), cache reads, share of the week, last activity. The bar is agents done out of started.
 - **Cards:** a coloured left edge for the state. A running agent shows its latest action, and `⏳ waiting on Bash for 2m` when a tool call has not returned yet.
 - **Click a card:** a side panel with **Result** and **Transcript**. `Esc` closes it.
@@ -154,7 +157,7 @@ CLAUDE_PROJECTS_DIR=/tmp/flowscope-demo/claude CODEX_SESSIONS_DIR=/tmp/flowscope
 
 ### CLI runs
 
-A script that calls `claude -p` or `codex exec` once per item leaves one session per call: Claude Code writes it under `~/.claude/projects` like any session but with the Agent SDK's system prompt, and Codex writes a rollout under `~/.codex/sessions` (override with `$CODEX_SESSIONS_DIR`) marked `codex_exec`. Flowscope puts runs of one tool, in one folder, whose prompts open the same way (first 300 characters), into one batch, and starts a new batch after a gap between starts: 30 minutes when the prompts open the same way, 10 otherwise ([R-T7, R-T8](docs/RULES.md#r-t-timing)). Each run is a card named by the last heading in its prompt (`# …` or `=== … ===`), which is usually the part that changes, such as `JUST HEARD (paragraph 12)`. A **live** Claude session, one a script keeps open and feeds a prompt per turn (`claude -p --input-format stream-json`), is one card named by its newest prompt's heading and its turn count, such as `JUST HEARD (paragraph 97) · 97 turns`. A Codex run is `done` when it logged `task_complete`; a Claude run is `done` when it ended on a text reply. A Codex batch shows `—` for share of the week, because Codex is billed separately.
+A script that calls `claude -p` or `codex exec` once per item leaves one session per call: Claude Code writes it under `~/.claude/projects` like any session but with the Agent SDK's system prompt, and Codex writes a rollout under `~/.codex/sessions` (override with `$CODEX_SESSIONS_DIR`) marked `codex_exec`. Flowscope puts runs of one tool, in one folder, whose prompts open the same way (first 300 characters), into one batch, and starts a new batch after a gap between starts: 30 minutes when the prompts open the same way, 10 otherwise ([R-T7, R-T8](docs/RULES.md#r-t-timing)). Runs that an app fires one at a time, each from its item's own folder in one repository, whose prompts start with the same five words (after "You are a"), and that would fall in more than one batch, are one **series** instead, however far apart ([R-L13](docs/RULES.md#r-l-limits)): "Claude ×15: Give this meeting a short title from what was said". A series opens as a table grouped by day, each run named by its folder. Each run is a card named by the last heading in its prompt (`# …` or `=== … ===`), which is usually the part that changes, such as `JUST HEARD (paragraph 12)`. A **live** Claude session, one a script keeps open and feeds a prompt per turn (`claude -p --input-format stream-json`), is one card named by its newest prompt's heading and its turn count, such as `JUST HEARD (paragraph 97) · 97 turns`. A Codex run is `done` when it logged `task_complete`; a Claude run is `done` when it ended on a text reply. A Codex batch shows `—` for share of the week, because Codex is billed separately.
 
 ### Status, and why it can lag
 
@@ -162,7 +165,7 @@ Claude Code writes a run's final record only when the run ends, so `completed` a
 
 When a workflow is resumed, agents from the earlier attempt that never finished show as `stopped`.
 
-A plain subagent is `done` when its metadata says it finished, or when it handed its report back (a background agent calls `SubagentHandback`; a foreground one ends on a text reply) and has written nothing for 5 seconds. That handed-back report is its **Result**. A message sent to the agent afterwards (SendMessage) resumes it, so it is `running` again until it hands back a new report. Otherwise it is `running` within the 15-minute window and `stopped` after. A session's agent group is `running` while any of its agents is.
+A plain subagent is `done` when its metadata says it finished, or when it handed its report back (a background agent calls `SubagentHandback`; a foreground one ends on a text reply) and has written nothing for 5 seconds. That handed-back report is its **Result**. A message sent to the agent afterwards (SendMessage) resumes it, so it is `running` again until it hands back a new report. Otherwise it is `running` within the 15-minute window and `stopped` after. A session is `running` while its conversation or anything it launched was written in the last 15 minutes; at rest it is `completed`, or `stopped` when one of its subagents was left unfinished. A conversation going quiet is not flagged while its person is only thinking: only while a subagent of it runs.
 
 ### Tokens and "share of the week"
 
@@ -179,8 +182,8 @@ Claude Code and Codex do not document these files, so an update can change them.
 The page uses these JSON endpoints, handy for scripts too (requests must be sent to `127.0.0.1` or `localhost`):
 
 - `GET /api/runs`: all runs, summarised
-- `GET /api/run?p=<project dir>&s=<session>&r=<runId>`: one run with phases and agents; `r=agents` gives the session's plain subagents, `r=cli` a CLI batch
-- `GET /api/agent?p=…&s=…&r=…&a=<agentId>`: one agent's transcript as events
+- `GET /api/run?p=<project dir>&s=<session>&r=<runId>`: one run with phases and agents; `r=session` gives a session with its conversation (`main`), plain subagents and workflows, `r=cli` a CLI batch or series
+- `GET /api/agent?p=…&s=…&r=…&a=<agentId>`: one agent's transcript as events; `a=main` a session's conversation
 - `GET /api/search?q=<text>`: transcripts that contain the text
 - `GET /api/format`: what in the input files looked unexpected
 - `GET /api/pid`: the server's process id
@@ -212,6 +215,7 @@ The docs are the specification and the code follows them: see [CONTRIBUTING.md](
 - [docs/DATA.md](docs/DATA.md) — API shapes and where each field shows on the page
 - [docs/FLOWS.md](docs/FLOWS.md) — user flows as checks with ids, and the test that covers each
 - [docs/RULES.md](docs/RULES.md) — every constant, threshold and limit
+- [CHANGELOG.md](CHANGELOG.md) — what changed for users, by version
 - [CONTRIBUTING.md](CONTRIBUTING.md) — docs as the source of truth, the id scheme, running tests and trace
 - [docs/UX.md](docs/UX.md) — the interface design
 
