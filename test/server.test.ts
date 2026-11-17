@@ -328,6 +328,13 @@ test("F-14.6 a link from 0.1 to a session's subagents answers the session", asyn
   expect((await (await get(`/api/agent?p=${r.projectKey}&s=${r.session}&r=agents&a=${a}`)).json()).length).toBeGreaterThan(0);
 });
 
+test("F-14.9 R-L14 a conversation's Latest reply is Claude's answer to the last prompt", async () => {
+  const r = (await runs()).find((x) => x.name === "Cheaper shipping");
+  const d = await detail(r);
+  // The earlier answer ("Shall I draft the plan?") was before the last prompt, so it is not the latest reply.
+  expect(d.main.result).toBe("Drafting the plan: two carriers, one rate table.");
+});
+
 test("F-14.7 R-C4 the conversation's transcript is read as it grows", async () => {
   const r = (await runs()).find((x) => x.name === "Spring sale plan");
   const url = `/api/agent?${q(r)}&a=main`;

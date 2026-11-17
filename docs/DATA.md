@@ -67,7 +67,7 @@ An unknown workflow or session with valid names is not an error: `/api/run` answ
 | `script` | string (workflow) | Script panel, highlighted |
 | `resume` | shell command (workflow, session) | Copy resume command |
 | `agents` | `Agent[]` | cards, table rows, timeline lanes, drawer |
-| `main` | session only: its conversation as an `Agent` with id `main`, type `conversation`, `tools` null, its action, wait, model and peak context from the file's tail (R-L14); null when the session has no file | the **Conversation** card, the drawer |
+| `main` | session only: its conversation as an `Agent` with id `main`, type `conversation`, `tools` null, its action, wait, model and peak context from the file's tail (R-L14), and as `result` its latest reply: Claude's text since the person's last prompt, `""` while unanswered; null when the session has no file | the **Conversation** card, the drawer |
 | `workflows` | session only: `{ session, runId, name, status, agents, agentsDone, lastActivity }[]` | **Workflows it launched** |
 
 ## Agent

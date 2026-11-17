@@ -12,7 +12,7 @@
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
-const BASELINE = 120;
+const BASELINE = 121;
 
 const ROOT = join(import.meta.dir, "..");
 const read = (f: string) => readFileSync(join(ROOT, f), "utf8");

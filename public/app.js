@@ -429,7 +429,7 @@ function stepAgent(d) {
 // The address follows the open agent (and a step in its transcript), so a link opens exactly that.
 let target = null;
 async function openAgent(id, t, step = null) { agentSel = id; target = step; const b = $("#dbody"); b._html = null; b.innerHTML = ""; b.scrollTop = 0;
-  tab = t ?? (agentOf(id)?.result ? "result" : "transcript"); $("#drawer").classList.add("open");
+  tab = t ?? (agentOf(id)?.result && agentOf(id).type !== "conversation" ? "result" : "transcript"); $("#drawer").classList.add("open");
   const h = `${key(sel)}/${id}${step != null ? `/${step}` : ""}`; if (location.hash.slice(1) !== h) history.replaceState(null, "", "#" + h);
   await renderDrawer();
   if (step != null) { const el = $(`#step-${step}`); if (el) { el.open = true; el.scrollIntoView({ block: "center" }); } }
@@ -548,9 +548,9 @@ async function renderDrawer() {
     <div class="dh-meta" title="agent id ${esc(a.agentId)}">${flags(a)}${esc([a.phase, a.type, a.model, a.effort && `${a.effort} effort`, a.tools != null && `${a.tools} tools`,
       a.peakContext && `peak context ${tok(a.peakContext)}`, run.weekShare != null && run.usage.weighted && `${pct(a.usage.weighted / run.usage.weighted * run.weekShare)} of this week's usage`].filter(Boolean).join(" · "))}
 </div>
-    <nav class="dtabs">${tabBtn("task", "Task", "P")}${tabBtn("result", "Result", "R")}${tabBtn("transcript", "Transcript", "T")}</nav>`);
+    <nav class="dtabs">${tabBtn("task", "Task", "P")}${tabBtn("result", a.type === "conversation" ? "Latest reply" : "Result", "R")}${tabBtn("transcript", "Transcript", "T")}</nav>`);
   const body = $("#dbody");
-  if (tab === "result") { setHTML(body, a.result ? md(a.result) : `<div class="empty">No result yet</div>`); return; }
+  if (tab === "result") { setHTML(body, a.result ? md(a.result) : `<div class="empty">${a.type === "conversation" ? "Claude has not replied to the last prompt yet" : "No result yet"}</div>`); return; }
   if (tab === "task") {
     // The prompt the agent was given: the first message of its transcript, fetched once.
     let t = taskCache.get(a.agentId);

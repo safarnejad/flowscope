@@ -47,7 +47,7 @@ The design puts the answer to each question one level deeper than the one before
 
 ## Session view
 
-- **Conversation first.** The header and stats (subagent counts only when it has subagents), then a wide **Conversation** card: running badge, model, tokens, peak context, started, last, and its latest action or tool wait. Clicking it opens the conversation in the drawer, as an agent's transcript.
+- **Conversation first.** The header and stats (subagent counts only when it has subagents), then a wide **Conversation** card: running badge, model, tokens, peak context, started, last, and its latest action or tool wait. Clicking it opens the conversation in the drawer, as an agent's transcript; its **Result** tab is called **Latest reply** and shows Claude's answer to the last prompt, since a conversation hands back no report. A conversation opens on **Transcript**, as the thread is what one comes back to it for.
 - **Then what it launched:** **Workflows it launched**, as tiles that open each workflow (whose page says "Launched from" this session), and **Subagents**, the usual board or timeline.
 - **A session that launched nothing** opens straight into its conversation in the drawer; Esc shows the page.
 - **Quiet.** A conversation is quiet whenever its person is thinking, so a session is flagged quiet only while a subagent of it runs, and a session at rest is not under **Needs a look** unless a subagent of it was cut off (R-T21, R-T25).

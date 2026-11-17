@@ -572,6 +572,15 @@ test("F-14.4 R-L14 a session with subagents shows its conversation above its sub
   await shot(page, "session");
 });
 
+test("F-14.9 a conversation's Latest reply tab shows Claude's answer to the last prompt", async ({ page }) => {
+  await open(page, "Cheaper shipping");
+  await page.locator("#main .card.convo").click();
+  await page.keyboard.press("r");
+  await expect(page.locator(".dtabs button.on")).toContainText("Latest reply");
+  await expect(page.locator("#dbody")).toContainText("Drafting the plan: two carriers, one rate table.");
+  await expect(page.locator("#dbody")).not.toContainText("Shall I draft the plan?");
+});
+
 test("F-14.5 a session lists the workflows it launched, and the workflow links back to it", async ({ page }) => {
   await open(page, "Money migration");
   const tile = page.locator("#main .hcard", { hasText: "money-migration" });

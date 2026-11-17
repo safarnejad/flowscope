@@ -458,7 +458,9 @@ function sessionDetail(l: Loc) {
   if (existsSync(f)) {
     const head = sessionHead(f), m: any = { agentId: MAIN, label: s.name, type: "conversation", resume,
       state: Date.now() - mtime(f) < LIVE_MS ? "running" : "done", startedAt: head.startedAt ?? mtime(f) };
-    describeLines(m, tailLines(f), f);
+    const lines = tailLines(f);
+    describeLines(m, lines, f);
+    m.result = latestReply(lines);
     m.tools = null;
     main = m;
   }
@@ -470,6 +472,20 @@ function sessionDetail(l: Loc) {
     logs: [], result: null, script: "",
     agents: agents.sort((a, b) => b.startedAt - a.startedAt),
   };
+}
+
+// A conversation's latest reply: Claude's text since the person's last prompt, from the file's tail (R-L14); "" while
+// Claude has not answered it yet. A conversation never hands back a report, so this is what its Result shows.
+function latestReply(lines: any[]) {
+  let reply = "";
+  for (const x of lines) {
+    const content = x.message?.content;
+    if (x.type === "user" && !(Array.isArray(content) && content.some((c: any) => c.type === "tool_result"))) reply = "";
+    if (x.type !== "assistant" || !Array.isArray(content) || x.isApiErrorMessage) continue;
+    const text = content.filter((c: any) => c.type === "text" && c.text.trim()).map((c: any) => c.text).join("\n\n");
+    if (text) reply = text;
+  }
+  return reply;
 }
 
 // Fills in what the transcript tells about an agent: start, activity, model, tokens, tool calls, current action. Returns its lines.
