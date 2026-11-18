@@ -187,6 +187,7 @@ The page uses these JSON endpoints, handy for scripts too (requests must be sent
 - `GET /api/search?q=<text>`: transcripts that contain the text
 - `GET /api/format`: what in the input files looked unexpected
 - `GET /api/pid`: the server's process id
+- `GET /api/version`: the running version (also `flowscope --version`, and under the name in the sidebar)
 
 Field-by-field shapes are in [docs/DATA.md](docs/DATA.md).
 

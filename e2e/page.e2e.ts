@@ -5,7 +5,7 @@
 // Time-based states come from file times set by the fixtures, not from waiting.
 import { test as base, expect, type Page } from "@playwright/test";
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdtempSync, rmSync, readdirSync, utimesSync, appendFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, rmSync, readdirSync, readFileSync, utimesSync, appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { makeDemo } from "../scripts/demo";
@@ -120,6 +120,13 @@ test("F-2.4 clicking Flowscope returns home and clears the hash", async ({ page 
   await page.locator(".brand").click();
   await expect(page.locator("#main header h2")).toHaveText("Now");
   expect(new URL(page.url()).hash).toBe("");
+});
+
+test("F-2.5 the sidebar shows the running version", async ({ page }) => {
+  const v = JSON.parse(readFileSync(join(import.meta.dirname, "..", "package.json"), "utf8")).version;
+  await page.goto(BASE + "/");
+  await expect(page.locator("#ver")).toHaveText("v" + v);
+  await expect(page.locator(".brand")).toHaveAttribute("title", `Flowscope ${v}`);
 });
 
 test("F-3.1 R-U7 the kind filter shows only that kind and is kept across a reload", async ({ page }) => {

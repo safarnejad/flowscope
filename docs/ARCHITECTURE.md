@@ -117,6 +117,7 @@ Three layers:
 | `-f`, `--foreground` | Serve in this process; build the run list once at boot (R-T12). | off |
 | `-p`, `--port <n>` | Port to serve on. | R-P1 |
 | `-o`, `--open` | Open the page with the platform's opener (`open`, `xdg-open`, `cmd /c start`). | off |
+| `-v`, `--version` | Print `flowscope <version>` from `package.json`; exit 0. Never checks for a newer one: Flowscope makes no request off the machine (R-S9). | |
 | `-h`, `--help` | Print usage, the kinds of runs shown, and the environment variables below; exit 0. | |
 | `FLOWSCOPE_PORT` | Port, when `-p` is not given. | `4747` |
 | `CLAUDE_PROJECTS_DIR` | Claude Code's projects root. | `~/.claude/projects` |

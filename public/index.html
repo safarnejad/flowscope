@@ -26,6 +26,7 @@ aside { border-right: 1px solid var(--line); overflow-y: auto; background: var(-
 aside h1.brand { font-size: 17px; margin: 16px 16px 0; display: flex; align-items: center; gap: 8px; }
 aside h1.brand .logo { width: 22px; height: 22px; flex: none; }
 aside .sub { margin: 2px 16px 12px 46px; }
+aside .ver { opacity: .7; white-space: nowrap; }
 .filters { margin: 0 16px 12px; display: flex; gap: 4px; }
 .kind { font-size: 11px; color: var(--mute); background: var(--code); padding: 1px 5px; border-radius: 4px; }
 .run { padding: 10px 16px; border-top: 1px solid var(--line); cursor: pointer; }
@@ -296,7 +297,7 @@ table.batch tr.dayrow td { color: var(--mute); font-size: 12px; font-weight: 600
 </style>
 </head>
 <body>
-<aside><div class="brandrow"><h1 class="brand" data-act="home" title="Home"><svg class="logo" viewBox="0 0 32 32" aria-hidden="true"><rect x="3" y="4" width="7" height="24" rx="2.5" fill="var(--accent)"/><rect x="12.5" y="4" width="7" height="11" rx="2.5" fill="var(--accent)"/><rect x="12.5" y="17" width="7" height="11" rx="2.5" fill="var(--accent)" opacity=".45"/><rect x="22" y="4" width="7" height="7" rx="2.5" fill="var(--run)"/></svg>Flowscope</h1><span><button class="bell" id="bell" data-act="notify"></button><span class="theme tabs filters" id="theme"></span></span></div><div class="small sub">Claude Code sessions, agents and workflows; Claude and Codex CLI runs</div><input id="search" type="search" placeholder="Search runs" data-input="search"><div class="tabs filters" id="filters"></div><div id="warn"></div><div id="runs"></div><div id="hits" class="hits"></div></aside>
+<aside><div class="brandrow"><h1 class="brand" data-act="home" title="Home"><svg class="logo" viewBox="0 0 32 32" aria-hidden="true"><rect x="3" y="4" width="7" height="24" rx="2.5" fill="var(--accent)"/><rect x="12.5" y="4" width="7" height="11" rx="2.5" fill="var(--accent)"/><rect x="12.5" y="17" width="7" height="11" rx="2.5" fill="var(--accent)" opacity=".45"/><rect x="22" y="4" width="7" height="7" rx="2.5" fill="var(--run)"/></svg>Flowscope</h1><span><button class="bell" id="bell" data-act="notify"></button><span class="theme tabs filters" id="theme"></span></span></div><div class="small sub">Claude Code sessions, agents and workflows; Claude and Codex CLI runs <span id="ver" class="ver"></span></div><input id="search" type="search" placeholder="Search runs" data-input="search"><div class="tabs filters" id="filters"></div><div id="warn"></div><div id="runs"></div><div id="hits" class="hits"></div></aside>
 <main id="main"><div class="empty">Choose a run</div></main>
 <div id="keys" popover class="keys"><dl>
   <dt><kbd>J</kbd><kbd>K</kbd></dt><dd>Next / previous agent</dd><dt><kbd>P</kbd></dt><dd>Task</dd><dt><kbd>R</kbd></dt><dd>Result</dd>

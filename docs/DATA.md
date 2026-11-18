@@ -13,6 +13,7 @@ The page talks to the server only through these GET endpoints. All return JSON u
 | `/api/agent?p=&s=&r=&a=` | `Event[]`, one agent's transcript |
 | `/api/search?q=` | `{ indexing, hits }`; limits in R-L3, R-L4 |
 | `/api/format` | `FormatIssue[]` |
+| `/api/version` | the running server's version as text, from its `package.json` |
 
 `p` is the raw project directory name (`projectKey`), `s` the session (or CLI batch or series id), `r` the run id (`wf_…`, `session`, or `cli`), `a` an agent id, or `main` for a session's own conversation. `r=agents`, which 0.1 used for a session's subagents, answers the session.
 

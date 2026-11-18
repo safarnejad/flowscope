@@ -257,6 +257,14 @@ test("F-1.6 help says what it covers, names Codex, CLI runs and every environmen
     expect(out).toContain(s);
 });
 
+test("F-1.7 F-2.5 prints and shows its own version, from package.json", async () => {
+  const v = JSON.parse(readFileSync(join(import.meta.dir, "..", "package.json"), "utf8")).version;
+  const r = Bun.spawnSync([process.execPath, SERVER, "--version"]);
+  expect(r.exitCode).toBe(0);
+  expect(r.stdout.toString().trim()).toBe(`flowscope ${v}`);
+  expect(await (await get("/api/version")).text()).toBe(v);
+});
+
 test("F-1.2 F-1.3 R-S7 starts in the background once, and stop stops it", async () => {
   const port = String(PORT + 100), cache = join(dir, "cache-bg");
   const run = (...a: string[]) => Bun.spawnSync([process.execPath, SERVER, ...a, "--port", port], { env: env(cache) });

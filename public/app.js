@@ -599,7 +599,12 @@ function goHome(push = true) { sel = null; run = null; closeDrawer(); if (push &
 window.addEventListener("popstate", route);
 window.addEventListener("hashchange", route);
 drawBell();
-loadRuns().then(route); loadFormat();
+loadRuns().then(route); loadFormat(); loadVersion();
+// The running server's version, under the name (F-2.5).
+async function loadVersion() {
+  const v = (await (await fetch("/api/version")).text()).trim();
+  $("#ver").textContent = "v" + v; $(".brand").title = `Flowscope ${v}`;
+}
 // R-T20
 setInterval(() => { loadRuns(); if (sel && (run?.status === "running")) loadRun(); }, 3000);
 setInterval(loadFormat, 60_000);

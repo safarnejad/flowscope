@@ -14,6 +14,7 @@ The design puts the answer to each question one level deeper than the one before
 
 ## Principles
 
+- **Which version.** The sidebar's line under the name ends with the running version (`v0.2.0`); `flowscope --version` prints the same. Nothing checks for a newer one.
 - **Now first.** Home and the sidebar open on what is running; finished work is "Recent" (3 runs) and the rest is behind History, grouped by day.
 - **Problems surface themselves.** Silent agents, long tool waits, stopped agents, empty or one-word answers, usage limits: each is counted in a strip of buttons above the board ("Needs a look") and colours the item itself (amber over R-T24, red over R-T23).
 - **Live but steady.** The page refreshes while a run is live (R-T20), but a redraw never closes what the reader opened, moves their scroll, or steals focus from a search box. Identical HTML is not redrawn.
