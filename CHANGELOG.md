@@ -4,6 +4,8 @@ What changed for people using Flowscope, by version. Versions follow semver; bef
 
 ## 0.2.0
 
+- `flowscope --version` prints the version, and the sidebar shows it under the name. Nothing checks for a newer one.
+
 **Every session is listed.**
 - Every Claude Code conversation is now a run of its own, kind `session`, named by its title (or its first prompt), dated by its last word, `running` while anything in it was written in the last 15 minutes. Before, a conversation showed only if it launched subagents, so an important thread could be missing.
 - A session and the subagents it launched are one row. A live conversation whose subagents finished days ago stays among today's runs instead of sinking into History.

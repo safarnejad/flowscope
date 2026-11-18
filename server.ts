@@ -16,8 +16,12 @@ const { values: args, positionals } = parseArgs({
     port: { type: "string", short: "p" },
     open: { type: "boolean", short: "o" },
     help: { type: "boolean", short: "h" },
+    version: { type: "boolean", short: "v" },
   },
 });
+// The version is the package's own, read from the file beside this one; nothing asks the network for a newer one.
+const APP_VERSION: string = JSON.parse(readFileSync(join(import.meta.dir, "package.json"), "utf8")).version;
+if (args.version) { console.log(`flowscope ${APP_VERSION}`); process.exit(0); }
 if (args.help) {
   console.log(`flowscope: a live view of Claude Code sessions, subagents and workflows, and of headless Claude Code and Codex CLI runs
 
@@ -27,6 +31,7 @@ if (args.help) {
   -f, --foreground serve in this terminal instead of the background
   -p, --port <n>   port to serve on (default 4747, or $FLOWSCOPE_PORT)
   -o, --open       open the page in the browser
+  -v, --version    print the version
   -h, --help       show this help
 
   Shows every Claude Code session with the subagents and workflows it launched, and headless \`claude -p\`
@@ -1003,6 +1008,7 @@ Bun.serve({
     const u = new URL(req.url);
     if (Object.hasOwn(STATIC, u.pathname)) return page(STATIC[u.pathname]);
     if (u.pathname === "/api/pid") return text(String(process.pid), 200, { "x-flowscope": "1" });
+    if (u.pathname === "/api/version") return text(APP_VERSION, 200);
     if (u.pathname === "/api/format") return json200([...formatIssues.values()]);
     if (u.pathname === "/api/search") {
       const qs = (u.searchParams.get("q") ?? "").trim();

@@ -41,6 +41,7 @@ Time-based states are tested by setting file times (`utimes`), not by waiting.
 | F-1.3 | Flowscope running | `bun server.ts stop` | it stops; `/api/pid` no longer answers | F-1.2 F-1.3 R-S7 starts in the background once, and stop stops it |
 | F-1.4 | another program answers `/api/pid` on the port without `x-flowscope` | `stop` | reports that Flowscope is not running and kills nothing | F-1.4 R-S11 stop leaves alone another program on the port |
 | F-1.5 | a start | — | the cache folder exists with mode `0700`; `cache.db` and its WAL files are `0600`; the background log is in the folder and `0600` (R-S7) | F-1.5 R-S7 keeps its cache private |
+| F-1.7 | — | `--version` | prints `flowscope <version>` from its `package.json` and exits 0; nothing is started and nothing is fetched | F-1.7 F-2.5 prints and shows its own version, from package.json |
 | F-1.6 | — | `--help` | its first line says it covers Claude Code sessions, subagents and workflows and headless Claude Code and Codex CLI runs; it names `claude -p` and `codex exec`, and every environment variable with its default | F-1.6 help says what it covers, names Codex, CLI runs and every environment variable |
 
 ## 2. Home page
@@ -52,6 +53,7 @@ Given X1, X2, X3, X4. Open `/`.
 | F-2.1 | runs of every state | open `/` | the sidebar has **Running** with X2 and the X4 session, **Recent** with up to 3 finished runs (R-L23); older ones sit behind **History (N) ›** | F-2.1 F-2.2 R-L23 R-K3 home: running, recent and history in the sidebar, Now with today's counts |
 | F-2.2 | same | open `/` | the main area shows **Now** with the count running, runs active today and today's tokens (R-K3) | F-2.1 F-2.2 R-L23 R-K3 home: running, recent and history in the sidebar, Now with today's counts |
 | F-2.3 | X3, and a running run quiet over R-T21 | open `/` | **Needs a look** lists X3 as stopped (idle under R-T25) and the quiet run | F-2.3 R-T21 a running run quiet over 10 minutes is under Needs a look; F-9.2 F-2.3 F-4.10 R-T25 a run that stops is told once and its notice opens it, home lists it under Needs a look |
+| F-2.5 | — | open `/` | the sidebar shows `v<version>` from `GET /api/version` under the name, and the name's tooltip says `Flowscope <version>` | F-2.5 the sidebar shows the running version; F-1.7 F-2.5 prints and shows its own version, from package.json |
 | F-2.4 | a run open | click **Flowscope** | returns home and clears the URL hash | F-2.4 clicking Flowscope returns home and clears the hash |
 
 ## 3. Filter and search runs
